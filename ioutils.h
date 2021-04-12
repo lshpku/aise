@@ -4,6 +4,7 @@
 #include <vector>
 #include "node.h"
 #include "llvm/ADT/Twine.h"
+#include "llvm/Support/raw_os_ostream.h"
 
 namespace aise
 {
@@ -25,6 +26,14 @@ class BBDAG
 // ReadBitcode parses bitcode file as DAGs.
 // Returns the number of parsed DAGs, -1 if there is any error.
 int ParseBitcode(llvm::Twine path, std::vector<BBDAG *> &buffer);
+
+template <typename Iterator>
+inline void PrintRange(Iterator begin, Iterator end)
+{
+    for (; begin != end; ++begin) {
+        llvm::outs() << *begin << ' ';
+    }
+}
 
 } // namespace aise
 

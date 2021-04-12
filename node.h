@@ -56,41 +56,31 @@ class Node
         FirstInputTy,
     };
 
-    struct Comparator {
-        bool operator()(const Node *a, const Node *b) const;
+    struct IndexLessCompare {
+        bool operator()(const Node *a, const Node *b) const
+        {
+            return a->Index < b->Index;
+        }
     };
 
-  public:
-    NodeType type;
-    std::list<Node *> prevList, succList;
-    std::set<Node *> prevSet, succSet;
+    NodeType Type;
+    std::list<Node *> Pred, Succ;
+    size_t Index;
 
-    bool Selected, HasPathToSelected;
-    bool isInput;
-
-  public:
-    Node() : type(UnkTy) {}
-    Node(NodeType type_) : type(type_) {}
+    Node() : Type(UnkTy) {}
+    Node(NodeType type) : Type(type) {}
 
     static Node *FromInstruction(const llvm::Instruction &inst);
 
-    NodeType Type() const { return type; }
+    void AddPred(Node *node) { Pred.push_back(node); }
+    void AddSucc(Node *node) { Succ.push_back(node); }
 
-    void AddPrev(Node *node)
-    {
-        prevList.push_back(node);
-        prevSet.insert(node);
-    }
-    void AddSucc(Node *node)
-    {
-        succList.push_back(node);
-        succSet.insert(node);
-    }
+    typedef std::list<Node *>::const_iterator const_node_iterator;
 
-    typedef std::list<Node *>::const_iterator list_iter;
-
-    bool hasPrev(Node *node) { return prevSet.find(node) != prevSet.end(); }
-    bool hasSucc(Node *node) { return succSet.find(node) != succSet.end(); }
+    const_node_iterator PredBegin() const { return Pred.begin(); }
+    const_node_iterator PredEnd() const { return Pred.end(); }
+    const_node_iterator SuccBegin() const { return Succ.begin(); }
+    const_node_iterator SuccEnd() const { return Succ.end(); }
 
     // Sort sorts the tree into a canonical form.
     // It doesn't expand the DAG into a tree, but change the order of
@@ -98,7 +88,7 @@ class Node
     void Sort();
 
     // Represent the expanding tree of the node in Reversed Polish Notation.
-    std::string Key();
+    void WriteKey(std::string &buffer);
 };
 
 llvm::raw_ostream &operator<<(llvm::raw_ostream &out, Node::NodeType type);

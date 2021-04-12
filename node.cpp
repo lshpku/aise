@@ -7,11 +7,6 @@ using namespace llvm;
 namespace aise
 {
 
-bool Node::Comparator::operator()(const Node *a, const Node *b) const
-{
-    return false;
-}
-
 #define OPCODE_NODE_TYPE(o, t) \
     case Instruction::o:       \
         type = Node::t;        \
@@ -125,10 +120,10 @@ raw_ostream &operator<<(raw_ostream &out, Node::NodeType type)
 
 raw_ostream &operator<<(raw_ostream &out, const Node &node)
 {
-    out << &node << " = " << node.Type();
-    Node::list_iter i = node.prevList.begin(), e = node.prevList.end();
+    out << '%' << node.Index << " = " << node.Type;
+    Node::const_node_iterator i = node.PredBegin(), e = node.PredEnd();
     for (; i != e; ++i) {
-        out << ' ' << *i;
+        out << " %" << (*i)->Index;
     }
     return out;
 }

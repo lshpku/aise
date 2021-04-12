@@ -9,6 +9,7 @@
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/raw_os_ostream.h"
 #include "llvm/Support/system_error.h"
+#include <vector>
 #include <queue>
 
 using namespace aise;
@@ -23,15 +24,15 @@ void parseBasicBlock(const BasicBlock &bb, std::vector<BBDAG *> &buffer)
 {
     outs() << "  " << bb.getName() << ":\n";
 
-    BBDAG *dag = new BBDAG();
+    std::vector<Node *> nodes;
     value_node_map opToNode;
 
     BasicBlock::const_iterator instIter = bb.begin(), instEnd = bb.end();
     for (; instIter != instEnd; ++instIter) {
         const Instruction &inst = *instIter;
         Node *node = Node::FromInstruction(inst);
-        opToNode.insert(std::make_pair(&inst, node));
 
+        // Add operands to node
         User::const_op_iterator opIter = inst.op_begin(), opEnd = inst.op_end();
         for (; opIter != opEnd; ++opIter) {
             value_node_map::iterator opNode = opToNode.find(*opIter);
@@ -40,16 +41,16 @@ void parseBasicBlock(const BasicBlock &bb, std::vector<BBDAG *> &buffer)
             // later in the same block but used by a phi instruction, it would
             // not be found. In this case, replace it with a unk.
             if (opNode == opToNode.end()) {
-                Node *virtIn = new Node(Node::UnknownTy);
-                dag->AddNode(virtIn);
-                node->AddPrev(virtIn);
-                virtIn->AddSucc(node);
+                Node *virtIn = new Node(Node::UnkTy);
+                virtIn->Index = nodes.size();
+                node->AddPred(virtIn);
+                nodes.push_back(virtIn);
             } else {
-                node->AddPrev(opNode->second);
-                opNode->second->AddSucc(node);
+                node->AddPred(opNode->second);
             }
         }
 
+        // Look for external uses of node
         Node *virtSucc = NULL;
         if (inst.isUsedOutsideOfBlock(&bb)) {
             virtSucc = new Node();
@@ -65,16 +66,30 @@ void parseBasicBlock(const BasicBlock &bb, std::vector<BBDAG *> &buffer)
             }
         }
 
-        dag->AddNode(node);
+        // Add node to dag
+        node->Index = nodes.size();
+        opToNode.insert(std::make_pair(&inst, node));
+        nodes.push_back(node);
         if (virtSucc) {
-            node->AddSucc(virtSucc);
-            virtSucc->AddPrev(node);
-            dag->AddNode(virtSucc);
+            virtSucc->Index = nodes.size();
+            virtSucc->AddPred(node);
+            nodes.push_back(virtSucc);
         }
     }
-    dag->Sort();
-    EnumerateMISO(dag->Nodes(), 2);
-    buffer.push_back(dag);
+
+    // Build successor dependency
+    {
+        std::vector<Node *>::iterator i = nodes.begin(), e = nodes.end();
+        Node::const_node_iterator predIter, predEnd;
+        for (; i != e; ++i) {
+            predIter = (*i)->PredBegin(), predEnd = (*i)->PredEnd();
+            for (; predIter != predEnd; ++predIter) {
+                (*predIter)->AddSucc(*i);
+            }
+        }
+    }
+
+    EnumerateMISO(nodes, 4);
 }
 
 } // namespace
