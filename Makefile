@@ -5,18 +5,15 @@ CPPFLAGS+=$(shell llvm-config --cppflags)
 
 LLVMLIBS=$(shell llvm-config --libs bitreader bitwriter core support)
 
-LOADABLE_MODULE_OPTIONS=-shared -Wl,-O1
+OBJECTS=main.o node.o ioutils.o miso.o
 
-all: irread
+all: main
 
 %.o: %.cpp
-	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $<
+	$(CXX) -c $(CXXFLAGS) $<
 
-irgen: irgen.o
-	$(CXX) -o $@ $(CXXFLAGS) $< $(LLVMLIBS) $(LDFLAGS)
+main: $(OBJECTS)
+	$(CXX) -o $@ $(CXXFLAGS) $^ $(LLVMLIBS) $(LDFLAGS)
 
-irread: irread.o
-	$(CXX) -o $@ $(CXXFLAGS) $< $(LLVMLIBS) $(LDFLAGS)
-
-fnarg.so: FnArgCnt.o
-	$(CXX) -o $@ $(LOADABLE_MODULE_OPTIONS) $(CXXFLAGS) $(LDFLAGS) $^
+clean:
+	rm -f *.o main
