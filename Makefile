@@ -12,6 +12,12 @@ all: main
 %.o: %.cpp
 	$(CXX) -c $(CXXFLAGS) $<
 
+%.bc: %.c
+	clang -emit-llvm -O3 -c -o $@ $<
+
+%.ll: %.c
+	clang -emit-llvm -O3 -S -o $@ $<
+
 main: $(OBJECTS)
 	$(CXX) -o $@ $(CXXFLAGS) $^ $(LLVMLIBS) $(LDFLAGS)
 

@@ -1,6 +1,7 @@
 #include "node.h"
 #include "miso.h"
 #include "ioutils.h"
+#include "llvm/ADT/StringMap.h"
 #include "llvm/Support/raw_os_ostream.h"
 #include <vector>
 #include <set>
@@ -14,8 +15,9 @@ namespace
 {
 
 typedef std::priority_queue<Node *, std::vector<Node *>, Node::IndexLessCompare> node_heap;
+typedef std::set<Node *, Node::IndexLessCompare> node_set;
 
-void pushPred(Node *node, node_heap &buffer)
+void pushAllPred(Node *node, node_heap &buffer)
 {
     Node::const_node_iterator i = node->PredBegin(), e = node->PredEnd();
     for (; i != e; ++i) {
@@ -25,7 +27,7 @@ void pushPred(Node *node, node_heap &buffer)
     }
 }
 
-bool succAllSelected(const Node *node, const std::set<Node *> &selected)
+bool succAllSelected(const Node *node, const node_set &selected)
 {
     Node::const_node_iterator i = node->SuccBegin(),
                               e = node->SuccEnd();
@@ -44,8 +46,8 @@ void getUpperCone(Node *root, std::vector<Node *> &buffer)
     }
 
     node_heap candidates;
-    std::set<Node *> selected;
-    pushPred(root, candidates);
+    node_set selected;
+    pushAllPred(root, candidates);
     buffer.push_back(root);
     selected.insert(root);
 
@@ -63,116 +65,195 @@ void getUpperCone(Node *root, std::vector<Node *> &buffer)
         }
 
         // select the node
-        pushPred(node, candidates);
+        pushAllPred(node, candidates);
         buffer.push_back(node);
         selected.insert(node);
     }
 }
 
-struct MISOContext {
+class MISOContext
+{
+  public:
     // root is at index 0
     std::vector<Node *> upperCone;
     std::vector<bool> choices;
     // selected and inputs don't overlap
-    std::set<Node *> selected, inputs;
+    node_set selected, inputs;
     int maxIn;
+
+    std::vector<std::string> uniqueInst;
+    StringMap<size_t> permutedInst;
 };
 
-void yieldMISO(const std::vector<Node *> &nodes, MISOContext &context)
+void writeRPN(Node *root, std::string &buffer)
 {
-    /*std::map<size_t, Node *> nodeMap;
-    std::set<size_t>::iterator i, e;
-
-    // make a copy of selected and input nodes
-    i = context.selected.begin(), e = context.selected.end();
+    Node::const_node_iterator i = root->PredBegin(), e = root->PredEnd();
     for (; i != e; ++i) {
-        Node *node = new Node(nodes[*i]->Type());
-        // selected node inherites all predicessors
-        node->prevList = nodes[*i]->prevList;
-        nodeMap[*i] = node;
+        writeRPN(*i, buffer);
+        buffer.push_back(' ');
     }
-
-    unsigned intputIndex = 0;
-    i = context.selected.begin(), e = context.selected.end();
-    for (; i != e; ++i) {
-        unsigned type = Node::FirstInputTy + intputIndex++;
-        Node *node = new Node((Node::NodeType)type);
-        // input node have no predicessor
-        nodeMap[*i] = node;
-    }
-
-    // get key of the MISO
-    std::string key;
-    std::vector<size_t> stack;
-    outs() << key << '\n';*/
+    buffer.append(root->TypeName());
 }
 
-void recurseMISO(const std::vector<Node *> &nodes, MISOContext &context)
+void yieldMISO(MISOContext &context)
 {
-    /*std::vector<size_t> newInputs;
+    std::map<Node *, Node *> nodeMap; // old ptr -> new ptr
+    std::vector<Node *> inputs;       // for permutation
+    node_set::iterator i, e;
+
+    // make a copy of selected and input nodes
+    // Copy Pred, but leave Succ and Index empty.
+    for (i = context.inputs.begin(), e = context.inputs.end(); i != e; ++i) {
+        Node *node = new Node();
+        nodeMap[*i] = node;
+        inputs.push_back(node);
+        // input nodes has no predecessor
+    }
+    for (i = context.selected.begin(), e = context.selected.end(); i != e; ++i) {
+        Node *node = new Node((*i)->Type);
+        nodeMap[*i] = node;
+        // the mapping should work since selected is in topological order
+        Node::const_node_iterator predIter = (*i)->PredBegin(),
+                                  predEnd = (*i)->PredEnd();
+        for (; predIter != predEnd; ++predIter) {
+            if (nodeMap.find(*predIter) == nodeMap.end()) {
+                outs() << "not found\n";
+            }
+            node->AddPred(nodeMap.find(*predIter)->second);
+        }
+    }
+
+    // try each order of input
+    Permutation perm(inputs.size());
+    Node *root = nodeMap[context.upperCone[0]];
+
+    for (size_t cnt = 0; perm.HasNext(); cnt++) {
+        const std::vector<size_t> &indexes = perm.Next();
+        for (int i = indexes.size() - 1; i >= 0; i--) {
+            inputs[i]->Type = (Node::NodeType)(indexes[i] + Node::FirstInputTy);
+        }
+        std::string RPN;
+        writeRPN(root, RPN);
+
+        if (context.permutedInst.find(RPN) != context.permutedInst.end()) {
+            break; // inst exists
+        }
+        if (cnt == 0) {
+            context.uniqueInst.push_back(RPN);
+        }
+        context.permutedInst[RPN] = context.uniqueInst.size() - 1;
+    }
+}
+
+void recurseMISO(MISOContext &context)
+{
+    std::vector<Node *> newInputs;
     bool isInput = false;
     bool choice = context.choices.back();
-    size_t index = context.upperCone[context.choices.size() - 1];
+    Node *node = context.upperCone[context.choices.size() - 1];
 
     if (choice) {
         // check outputs
         // all nodes except root should have their outputs selected
         if (context.choices.size() > 1) {
-            if (!succAllSelected(nodes[index], context.selected)) {
+            if (!succAllSelected(node, context.selected)) {
                 return;
             }
         }
 
         // update inputs
-        Node::list_iter prevIter = nodes[index]->prevList.begin(),
-                        prevEnd = nodes[index]->prevList.end();
-        for (; prevIter != prevEnd; ++prevIter) {
-            if (context.inputs.find(*prevIter) == context.inputs.end()) {
-                newInputs.push_back(*prevIter);
-                context.inputs.insert(*prevIter);
+        {
+            Node::const_node_iterator i = node->PredBegin(),
+                                      e = node->PredEnd();
+            for (; i != e; ++i) {
+                if (context.inputs.find(*i) == context.inputs.end()) {
+                    newInputs.push_back(*i);
+                    context.inputs.insert(*i);
+                }
             }
         }
-        if (context.inputs.find(index) != context.inputs.end()) {
+        if (context.inputs.find(node) != context.inputs.end()) {
             isInput = true;
-            context.inputs.insert(index);
+            context.inputs.erase(node);
         }
 
-        context.selected.insert(index);
+        context.selected.insert(node);
 
         // yield a result
         if (context.inputs.size() <= context.maxIn) {
-            yieldMISO(nodes, context);
+            yieldMISO(context);
         }
     }
 
     // recurse
     if (context.choices.size() < context.upperCone.size()) {
         context.choices.push_back(true);
-        recurseMISO(nodes, context);
+        recurseMISO(context);
         context.choices.pop_back();
         context.choices.push_back(false);
-        recurseMISO(nodes, context);
+        recurseMISO(context);
         context.choices.pop_back();
     }
 
     // restore selected and inputs
     if (choice) {
-        context.selected.erase(index);
+        context.selected.erase(node);
         if (isInput) {
-            context.inputs.insert(index);
+            context.inputs.insert(node);
         }
-        std::vector<size_t>::iterator inputIter = newInputs.begin(),
-                                      inputEnd = newInputs.end();
-        for (; inputIter != inputEnd; ++inputIter) {
-            context.inputs.erase(*inputIter);
+        std::vector<Node *>::iterator i = newInputs.begin(),
+                                      e = newInputs.end();
+        for (; i != e; ++i) {
+            context.inputs.erase(*i);
         }
-    }*/
+    }
 }
 
 } // namespace
 
 namespace aise
 {
+
+Permutation::Permutation(size_t n)
+{
+    index.resize(n);
+    for (size_t i = 0; i < n; i++) {
+        index[i] = i;
+    }
+    status.reserve(n);
+    if (n > 0) {
+        status.push_back(0);
+    }
+}
+
+const std::vector<size_t> &Permutation::Next()
+{
+    // push status until full
+    while (status.size() < index.size()) {
+        status.push_back(0);
+    }
+
+    // pop status until one is increased or empty
+    while (!status.empty()) {
+        size_t i = status.size() - 1;
+        if (status.back() == index.size() - status.size()) {
+            status.pop_back();
+            size_t lastIndex = index[i];
+            for (; i < index.size() - 1; i++) {
+                index[i] = index[i + 1];
+            }
+            index[i] = lastIndex;
+        } else {
+            status[i]++;
+            size_t tmp = index[i];
+            index[i] = index[i + status[i]];
+            index[i + status[i]] = tmp;
+            break;
+        }
+    }
+
+    return index;
+}
 
 void EnumerateMISO(const std::vector<Node *> &nodes, int maxIn)
 {
@@ -181,7 +262,7 @@ void EnumerateMISO(const std::vector<Node *> &nodes, int maxIn)
     }
 
     MISOContext context;
-    context.maxIn = maxIn;
+    context.maxIn = 3;
 
     for (int i = 0, e = nodes.size(); i < e; i++) {
         context.choices.clear();
@@ -189,17 +270,20 @@ void EnumerateMISO(const std::vector<Node *> &nodes, int maxIn)
         context.upperCone.clear();
         context.inputs.clear();
         getUpperCone(nodes[i], context.upperCone);
-        outs() << "    " << *nodes[i] << "\n[";
-        for (int j = 0; j < context.upperCone.size(); j++) {
-            outs() << context.upperCone[j]->Index << ' ';
-        }
-        outs() << "]\n";
 
         if (!context.upperCone.empty()) {
             // always select root
             context.choices.push_back(context.upperCone[0]);
-            recurseMISO(nodes, context);
+            recurseMISO(context);
         }
+    }
+    {
+        std::vector<std::string>::iterator i = context.uniqueInst.begin(),
+                                           e = context.uniqueInst.end();
+        for (; i != e; ++i) {
+            outs() << "    " << *i << '\n';
+        }
+        outs() << "    ---- total " << context.permutedInst.size() << " ----\n";
     }
 }
 

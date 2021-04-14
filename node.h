@@ -16,6 +16,7 @@ class Node
   public:
     enum NodeType {
         UnkTy,
+        IntTy,
 
         // Unary ops
         AddInvTy,
@@ -70,7 +71,11 @@ class Node
     Node() : Type(UnkTy) {}
     Node(NodeType type) : Type(type) {}
 
-    static Node *FromInstruction(const llvm::Instruction &inst);
+    static const char *TypeName(NodeType type);
+    const char *TypeName() const { return TypeName(Type); }
+
+    static Node *FromInstruction(const llvm::Instruction *inst);
+    static Node *FromValue(const llvm::Value *val);
 
     void AddPred(Node *node) { Pred.push_back(node); }
     void AddSucc(Node *node) { Succ.push_back(node); }

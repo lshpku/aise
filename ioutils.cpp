@@ -2,9 +2,10 @@
 #include "miso.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/Bitcode/ReaderWriter.h"
+#include "llvm/IR/Constant.h"
 #include "llvm/IR/Function.h"
-#include "llvm/IR/Module.h"
 #include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/raw_os_ostream.h"
@@ -25,30 +26,42 @@ void parseBasicBlock(const BasicBlock &bb, std::vector<BBDAG *> &buffer)
     outs() << "  " << bb.getName() << ":\n";
 
     std::vector<Node *> nodes;
-    value_node_map opToNode;
+    value_node_map nodeMap;
 
     BasicBlock::const_iterator instIter = bb.begin(), instEnd = bb.end();
     for (; instIter != instEnd; ++instIter) {
         const Instruction &inst = *instIter;
-        Node *node = Node::FromInstruction(inst);
+        Node *node = Node::FromInstruction(&inst);
 
         // Add operands to node
         User::const_op_iterator opIter = inst.op_begin(), opEnd = inst.op_end();
         for (; opIter != opEnd; ++opIter) {
-            value_node_map::iterator opNode = opToNode.find(*opIter);
+            // Always create a new node for constant. There is no need to
+            // save the node in the map.
+            if (Constant::classof(*opIter)) {
+                Node *cons = Node::FromValue(*opIter);
+                cons->Index = nodes.size();
+                node->AddPred(cons);
+                nodes.push_back(cons);
+                continue;
+            }
+
+            value_node_map::iterator opNode = nodeMap.find(*opIter);
 
             // When the operand is defined in another basic block, or is defined
             // later in the same block but used by a phi instruction, it would
             // not be found. In this case, replace it with a unk.
-            if (opNode == opToNode.end()) {
-                Node *virtIn = new Node(Node::UnkTy);
+            if (opNode == nodeMap.end()) {
+                Node *virtIn = new Node();
                 virtIn->Index = nodes.size();
                 node->AddPred(virtIn);
                 nodes.push_back(virtIn);
+                nodeMap[*opIter] = virtIn;
             } else {
                 node->AddPred(opNode->second);
             }
         }
+        outs() << '\n';
 
         // Look for external uses of node
         Node *virtSucc = NULL;
@@ -59,7 +72,7 @@ void parseBasicBlock(const BasicBlock &bb, std::vector<BBDAG *> &buffer)
                                       useEnd = inst.use_end();
             for (; useIter != useEnd; ++useIter) {
                 // used by previous phi in the same block
-                if (opToNode.find(*useIter) != opToNode.end()) {
+                if (nodeMap.find(*useIter) != nodeMap.end()) {
                     virtSucc = new Node();
                     break;
                 }
@@ -68,7 +81,7 @@ void parseBasicBlock(const BasicBlock &bb, std::vector<BBDAG *> &buffer)
 
         // Add node to dag
         node->Index = nodes.size();
-        opToNode.insert(std::make_pair(&inst, node));
+        nodeMap[&inst] = node;
         nodes.push_back(node);
         if (virtSucc) {
             virtSucc->Index = nodes.size();
@@ -89,7 +102,7 @@ void parseBasicBlock(const BasicBlock &bb, std::vector<BBDAG *> &buffer)
         }
     }
 
-    EnumerateMISO(nodes, 4);
+    EnumerateMISO(nodes, 2);
 }
 
 } // namespace
