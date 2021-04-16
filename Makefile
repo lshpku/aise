@@ -21,5 +21,8 @@ all: main
 main: $(OBJECTS)
 	$(CXX) -o $@ $(CXXFLAGS) $^ $(LLVMLIBS) $(LDFLAGS)
 
+count:
+	wc -l *.h *.cpp
+
 clean:
 	rm -f *.o main

@@ -27,10 +27,21 @@ void pushAllPred(Node *node, node_heap &buffer)
     }
 }
 
-bool succAllSelected(const Node *node, const node_set &selected)
+bool isConvexAndNotOutput(const Node *node, const node_set &selected)
 {
-    Node::const_node_iterator i = node->SuccBegin(),
-                              e = node->SuccEnd();
+    Node::const_node_iterator i = node->SuccBegin(), e = node->SuccEnd();
+
+    // A constant is considered convex if one of its successors is
+    // selected. Constants are never considered as output.
+    if (node->Type == Node::ConstTy) {
+        for (; i != e; ++i) {
+            if (selected.find(*i) != selected.end()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     for (; i != e; ++i) {
         if (selected.find(*i) == selected.end()) {
             return false;
@@ -39,6 +50,7 @@ bool succAllSelected(const Node *node, const node_set &selected)
     return true;
 }
 
+// Get upper cone of root in reversed topological order (root at buffer[0]).
 void getUpperCone(Node *root, std::vector<Node *> &buffer)
 {
     if (root->Type == Node::UnkTy) {
@@ -60,7 +72,7 @@ void getUpperCone(Node *root, std::vector<Node *> &buffer)
             continue;
         }
         // convex and has no outer successor
-        if (!succAllSelected(node, selected)) {
+        if (!isConvexAndNotOutput(node, selected)) {
             continue;
         }
 
@@ -85,16 +97,6 @@ class MISOContext
     StringMap<size_t> permutedInst;
 };
 
-void writeRPN(Node *root, std::string &buffer)
-{
-    Node::const_node_iterator i = root->PredBegin(), e = root->PredEnd();
-    for (; i != e; ++i) {
-        writeRPN(*i, buffer);
-        buffer.push_back(' ');
-    }
-    buffer.append(root->TypeName());
-}
-
 void yieldMISO(MISOContext &context)
 {
     std::map<Node *, Node *> nodeMap; // old ptr -> new ptr
@@ -110,7 +112,7 @@ void yieldMISO(MISOContext &context)
         // input nodes has no predecessor
     }
     for (i = context.selected.begin(), e = context.selected.end(); i != e; ++i) {
-        Node *node = new Node((*i)->Type);
+        Node *node = Node::FromTypeOfNode(*i);
         nodeMap[*i] = node;
         // the mapping should work since selected is in topological order
         Node::const_node_iterator predIter = (*i)->PredBegin(),
@@ -123,26 +125,55 @@ void yieldMISO(MISOContext &context)
         }
     }
 
-    // try each order of input
-    Permutation perm(inputs.size());
+    // relax order
     Node *root = nodeMap[context.upperCone[0]];
+    outs() << "[";
+    for (std::map<Node *, Node *>::iterator i = nodeMap.begin(), e = nodeMap.end(); i != e; ++i) {
+        outs() << ' ' << *i->second << ';';
+    }
+    outs() << "]\n";
+    std::vector<Node *> labelNodes;
+    root->RelaxOrder(labelNodes);
 
-    for (size_t cnt = 0; perm.HasNext(); cnt++) {
+    // try each order of input
+    // For instructions like a single constant, the input number is 0 and
+    // there is no permutation. It will generate no instruction.
+    Permutation perm(inputs.size());
+    std::string RPN;
+
+    for (bool isFirst = true; perm.HasNext(); isFirst = false) {
         const std::vector<size_t> &indexes = perm.Next();
         for (int i = indexes.size() - 1; i >= 0; i--) {
             inputs[i]->Type = (Node::NodeType)(indexes[i] + Node::FirstInputTy);
         }
-        std::string RPN;
-        writeRPN(root, RPN);
+        root->Sort();
+        RPN.clear();
+        root->WriteRPN(RPN);
 
         if (context.permutedInst.find(RPN) != context.permutedInst.end()) {
             break; // inst exists
         }
-        if (cnt == 0) {
+        if (isFirst) {
             context.uniqueInst.push_back(RPN);
         }
         context.permutedInst[RPN] = context.uniqueInst.size() - 1;
     }
+
+    /*/ delete new nodes
+    {
+        std::map<Node *, Node *>::iterator i = nodeMap.begin(),
+                                           e = nodeMap.end();
+        for (; i != e; ++i) {
+            delete i->second;
+        }
+    }
+    {
+        std::vector<Node *>::iterator i = labelNodes.begin(),
+                                      e = labelNodes.end();
+        for (; i != e; ++i) {
+            delete *i;
+        }
+    }*/
 }
 
 void recurseMISO(MISOContext &context)
@@ -156,7 +187,7 @@ void recurseMISO(MISOContext &context)
         // check outputs
         // all nodes except root should have their outputs selected
         if (context.choices.size() > 1) {
-            if (!succAllSelected(node, context.selected)) {
+            if (!isConvexAndNotOutput(node, context.selected)) {
                 return;
             }
         }
@@ -179,8 +210,10 @@ void recurseMISO(MISOContext &context)
 
         context.selected.insert(node);
 
-        // yield a result
-        if (context.inputs.size() <= context.maxIn) {
+        // check inputs before yielding a result
+        // Note: omit primary op.
+        if (context.inputs.size() <= context.maxIn &&
+            context.selected.size() > 1) {
             yieldMISO(context);
         }
     }
@@ -198,13 +231,13 @@ void recurseMISO(MISOContext &context)
     // restore selected and inputs
     if (choice) {
         context.selected.erase(node);
-        if (isInput) {
-            context.inputs.insert(node);
-        }
         std::vector<Node *>::iterator i = newInputs.begin(),
                                       e = newInputs.end();
         for (; i != e; ++i) {
             context.inputs.erase(*i);
+        }
+        if (isInput) {
+            context.inputs.insert(node);
         }
     }
 }
@@ -262,19 +295,23 @@ void EnumerateMISO(const std::vector<Node *> &nodes, int maxIn)
     }
 
     MISOContext context;
-    context.maxIn = 3;
+    context.maxIn = 2;
 
-    for (int i = 0, e = nodes.size(); i < e; i++) {
-        context.choices.clear();
-        context.selected.clear();
-        context.upperCone.clear();
-        context.inputs.clear();
-        getUpperCone(nodes[i], context.upperCone);
+    {
+        std::vector<Node *>::const_iterator i = nodes.begin(),
+                                            e = nodes.end();
+        for (; i != e; ++i) {
+            context.choices.clear();
+            context.selected.clear();
+            context.upperCone.clear();
+            context.inputs.clear();
+            getUpperCone(*i, context.upperCone);
 
-        if (!context.upperCone.empty()) {
-            // always select root
-            context.choices.push_back(context.upperCone[0]);
-            recurseMISO(context);
+            if (!context.upperCone.empty()) {
+                // always select root
+                context.choices.push_back(true);
+                recurseMISO(context);
+            }
         }
     }
     {

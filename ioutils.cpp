@@ -36,23 +36,13 @@ void parseBasicBlock(const BasicBlock &bb, std::vector<BBDAG *> &buffer)
         // Add operands to node
         User::const_op_iterator opIter = inst.op_begin(), opEnd = inst.op_end();
         for (; opIter != opEnd; ++opIter) {
-            // Always create a new node for constant. There is no need to
-            // save the node in the map.
-            if (Constant::classof(*opIter)) {
-                Node *cons = Node::FromValue(*opIter);
-                cons->Index = nodes.size();
-                node->AddPred(cons);
-                nodes.push_back(cons);
-                continue;
-            }
-
             value_node_map::iterator opNode = nodeMap.find(*opIter);
 
             // When the operand is defined in another basic block, or is defined
-            // later in the same block but used by a phi instruction, it would
-            // not be found. In this case, replace it with a unk.
+            // later in the same block but used by a phi instruction, or is
+            // constant, it would not be found.
             if (opNode == nodeMap.end()) {
-                Node *virtIn = new Node();
+                Node *virtIn = Node::FromValue(*opIter);
                 virtIn->Index = nodes.size();
                 node->AddPred(virtIn);
                 nodes.push_back(virtIn);
@@ -61,7 +51,6 @@ void parseBasicBlock(const BasicBlock &bb, std::vector<BBDAG *> &buffer)
                 node->AddPred(opNode->second);
             }
         }
-        outs() << '\n';
 
         // Look for external uses of node
         Node *virtSucc = NULL;
