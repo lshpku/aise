@@ -56,10 +56,7 @@ class Node
     };
 
     struct IndexLessCompare {
-        bool operator()(const Node *a, const Node *b) const
-        {
-            return a->Index < b->Index;
-        }
+        bool operator()(const Node *a, const Node *b) const;
     };
 
     NodeType Type;
@@ -74,6 +71,10 @@ class Node
     const char *TypeName() const { return TypeName(Type); }
 
     bool TypeOf(const Node *target) const { return target->Type == Type; }
+    bool TypeOf(NodeType _type) const { return _type == Type; }
+
+    bool IsLabel() const { return TypeOf(Order1Ty) || TypeOf(Order2Ty); }
+    bool IsConstant() const { return TypeOf(ConstTy); }
 
     static Node *FromInstruction(const llvm::Instruction *inst);
     static Node *FromValue(const llvm::Value *val);
@@ -81,6 +82,7 @@ class Node
 
     void AddPred(Node *node) { Pred.push_back(node); }
     void AddSucc(Node *node) { Succ.push_back(node); }
+    void PropagateSucc();
 
     typedef std::list<Node *>::iterator node_iterator;
     typedef std::list<Node *>::const_iterator const_node_iterator;
@@ -90,28 +92,29 @@ class Node
     const_node_iterator SuccBegin() const { return Succ.begin(); }
     const_node_iterator SuccEnd() const { return Succ.end(); }
 
-  private:
-    // getSameTypeNodes adds all connected nodes of the same type to buffer.
-    // The current node would not be added.
-    void getSameTypeNodes(std::list<Node *> &buffer);
-
   public:
     // RelaxOrder merges operands of associative ops (+, *, &, |, ^), and
     // adds order labels to non-commutative ops (-, /, %, shift, ?:, cmp).
-    // Nodes may be excluded from the instruction, and there may be new
-    // nodes created. For convenience of memory management, new nodes are
-    // added to buffer.
-    void RelaxOrder(std::vector<Node *> &buffer);
+    // Merged operands are excluded from the current node. For convenience
+    // of memory management, new labels are added to buffer.
+    // Note: this method is not recursive. Call it in topological order.
+    void RelaxOrder(std::list<Node *> &buffer);
 
-    // Sort sorts the tree into a canonical form.
-    // It doesn't expand the DAG into a tree, but change the order of
-    // children of each node.
+    // ToAssociative transforms the op to it's associative-equivalent form.
+    // There may be new nodes created and they are added to buffer.
+    // Note: call this method after the node is completed.
+    void ToAssociative(std::list<Node *> &buffer);
+
+    // Sort sorts the operands of the current node (not recursive).
+    // It's required that the predecessors are all sorted.
     void Sort();
 
     // WriteRPN writes the Reversed Polish notation of the expanding tree
     // of this node.
     void WriteRPN(std::string &buffer) const;
 };
+
+void CanonTopoSort(std::vector<Node *> &DAG, std::vector<size_t> choice);
 
 llvm::raw_ostream &operator<<(llvm::raw_ostream &out, Node::NodeType type);
 llvm::raw_ostream &operator<<(llvm::raw_ostream &out, const Node &node);

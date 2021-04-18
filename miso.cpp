@@ -16,6 +16,7 @@ namespace
 
 typedef std::priority_queue<Node *, std::vector<Node *>, Node::IndexLessCompare> node_heap;
 typedef std::set<Node *, Node::IndexLessCompare> node_set;
+typedef std::map<Node *, Node *, Node::IndexLessCompare> node_node_map;
 
 void pushAllPred(Node *node, node_heap &buffer)
 {
@@ -99,54 +100,59 @@ class MISOContext
 
 void yieldMISO(MISOContext &context)
 {
-    std::map<Node *, Node *> nodeMap; // old ptr -> new ptr
-    std::vector<Node *> inputs;       // for permutation
+    node_node_map nodeMap; // old ptr -> new ptr
+    std::list<Node *> newNodes;
+    std::vector<Node *> inputs; // for permutation
     node_set::iterator i, e;
 
     // make a copy of selected and input nodes
-    // Copy Pred, but leave Succ and Index empty.
+    // Only copy Pred, leave Succ and Index empty.
     for (i = context.inputs.begin(), e = context.inputs.end(); i != e; ++i) {
+        // input nodes has no type nor predecessor
         Node *node = new Node();
         nodeMap[*i] = node;
         inputs.push_back(node);
-        // input nodes has no predecessor
     }
     for (i = context.selected.begin(), e = context.selected.end(); i != e; ++i) {
         Node *node = Node::FromTypeOfNode(*i);
-        nodeMap[*i] = node;
         // the mapping should work since selected is in topological order
         Node::const_node_iterator predIter = (*i)->PredBegin(),
                                   predEnd = (*i)->PredEnd();
         for (; predIter != predEnd; ++predIter) {
-            if (nodeMap.find(*predIter) == nodeMap.end()) {
-                outs() << "not found\n";
-            }
             node->AddPred(nodeMap.find(*predIter)->second);
         }
+        node->ToAssociative(newNodes);
+        nodeMap[*i] = node;
     }
 
     // relax order
-    Node *root = nodeMap[context.upperCone[0]];
-    outs() << "[";
-    for (std::map<Node *, Node *>::iterator i = nodeMap.begin(), e = nodeMap.end(); i != e; ++i) {
-        outs() << ' ' << *i->second << ';';
+    {
+        node_node_map::iterator i = nodeMap.begin(), e = nodeMap.end();
+        for (; i != e; ++i) {
+            i->second->RelaxOrder(newNodes);
+        }
     }
-    outs() << "]\n";
-    std::vector<Node *> labelNodes;
-    root->RelaxOrder(labelNodes);
 
     // try each order of input
     // For instructions like a single constant, the input number is 0 and
-    // there is no permutation. It will generate no instruction.
+    // there is no permutation, thus no instruction is generated.
     Permutation perm(inputs.size());
     std::string RPN;
-
+    Node *root = nodeMap[context.upperCone[0]];
     for (bool isFirst = true; perm.HasNext(); isFirst = false) {
         const std::vector<size_t> &indexes = perm.Next();
         for (int i = indexes.size() - 1; i >= 0; i--) {
             inputs[i]->Type = (Node::NodeType)(indexes[i] + Node::FirstInputTy);
         }
-        root->Sort();
+
+        // call Sort() in topological order
+        {
+            node_node_map::iterator i = nodeMap.begin(), e = nodeMap.end();
+            for (; i != e; ++i) {
+                i->second->Sort();
+            }
+        }
+
         RPN.clear();
         root->WriteRPN(RPN);
 
@@ -159,21 +165,19 @@ void yieldMISO(MISOContext &context)
         context.permutedInst[RPN] = context.uniqueInst.size() - 1;
     }
 
-    /*/ delete new nodes
+    // delete new nodes
     {
-        std::map<Node *, Node *>::iterator i = nodeMap.begin(),
-                                           e = nodeMap.end();
+        node_node_map::iterator i = nodeMap.begin(), e = nodeMap.end();
         for (; i != e; ++i) {
             delete i->second;
         }
     }
     {
-        std::vector<Node *>::iterator i = labelNodes.begin(),
-                                      e = labelNodes.end();
+        std::list<Node *>::iterator i = newNodes.begin(), e = newNodes.end();
         for (; i != e; ++i) {
             delete *i;
         }
-    }*/
+    }
 }
 
 void recurseMISO(MISOContext &context)
@@ -288,18 +292,19 @@ const std::vector<size_t> &Permutation::Next()
     return index;
 }
 
-void EnumerateMISO(const std::vector<Node *> &nodes, int maxIn)
+void EnumerateMISO(const std::vector<Node *> &DAG, int maxIn)
 {
-    if (nodes.empty()) {
+    if (DAG.empty()) {
         return;
     }
 
     MISOContext context;
     context.maxIn = 2;
 
+    // try each node in DAG as root of the MISO instruction
     {
-        std::vector<Node *>::const_iterator i = nodes.begin(),
-                                            e = nodes.end();
+        std::vector<Node *>::const_iterator i = DAG.begin(),
+                                            e = DAG.end();
         for (; i != e; ++i) {
             context.choices.clear();
             context.selected.clear();

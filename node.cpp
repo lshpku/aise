@@ -3,7 +3,9 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/InstrTypes.h"
 #include <sstream>
+#include <set>
 
+using namespace aise;
 using namespace llvm;
 
 namespace aise
@@ -149,17 +151,6 @@ Node *Node::FromTypeOfNode(const Node *target)
     return node;
 }
 
-void Node::getSameTypeNodes(std::list<Node *> &buffer)
-{
-    const_node_iterator i = PredBegin(), e = PredEnd();
-    for (; i != e; ++i) {
-        if (TypeOf(*i)) {
-            buffer.push_back(*i);
-            (*i)->getSameTypeNodes(buffer);
-        }
-    }
-}
-
 #define CASE_ASSOCIATIVE \
     case AddTy:          \
     case MulTy:          \
@@ -175,58 +166,42 @@ void Node::getSameTypeNodes(std::list<Node *> &buffer)
     case LtTy:   \
     case LeTy
 
-void Node::RelaxOrder(std::vector<Node *> &buffer)
+void Node::RelaxOrder(std::list<Node *> &buffer)
 {
     switch (Type) {
     // associative
     CASE_ASSOCIATIVE : {
-        // Merge all operands of the connected nodes of the same type.
-        // Those nodes are as wiped from the instruction.
-        std::list<Node *> sameTypeNodes;
-        getSameTypeNodes(sameTypeNodes);
-        outs() << "same type nodes: [";
-        for (std::list<Node *>::iterator i = sameTypeNodes.begin(), e = sameTypeNodes.end(); i != e; ++i) {
-            outs() << ' ' << *(*i) << ';';
-        }
-        outs() << "]\n";
-        std::list<Node *>::iterator nodeIter = sameTypeNodes.begin(),
-                                    nodeEnd = sameTypeNodes.end();
-        for (; nodeIter != nodeEnd; ++nodeIter) {
-            Node::const_node_iterator opIter = (*nodeIter)->PredBegin(),
-                                      opEnd = (*nodeIter)->PredEnd();
-            for (; opIter != opEnd; ++opIter) {
-                if (!TypeOf(*opIter)) {
-                    Pred.push_back(*opIter);
-                }
-            }
-        }
-        // delete nodes of the same type from the current node
-        {
-            node_iterator i = Pred.begin(), e = Pred.end();
-            while (i != e) {
-                if (TypeOf(*i)) {
-                    i = Pred.erase(i);
-                } else {
-                    ++i;
-                }
+        // count steps instead of using end() since Pred may increase
+        size_t size = Pred.size(), pos = 0;
+        for (node_iterator i = Pred.begin(); pos < size; ++pos) {
+            if (TypeOf(*i)) {
+                Pred.insert(Pred.end(), (*i)->PredBegin(), (*i)->PredEnd());
+                i = Pred.erase(i);
+            } else {
+                ++i;
             }
         }
     } break;
 
-    // non-commutative but can be transformed to commutative one
+    // non-commutative
     case SubTy:
-    case DivTy: {
-
-    } break;
-
-    // non-commutative and just need ordering labels
+    case DivTy:
     case RemTy:
     case ShlTy:
     case LshrTy:
     case AshrTy:
     CASE_CMP:
     case SelectTy: {
-
+        node_iterator i = Pred.begin(), e = Pred.end();
+        for (unsigned cnt = 0; i != e && cnt < 3; ++cnt, ++i) {
+            // add ordering labels to operands since the second one
+            if (cnt > 0) {
+                Node *label = new Node((NodeType)(Order1Ty + cnt - 1));
+                label->AddPred(*i);
+                *i = label;
+                buffer.push_back(label);
+            }
+        }
     } break;
 
     default:
@@ -234,14 +209,93 @@ void Node::RelaxOrder(std::vector<Node *> &buffer)
     }
 }
 
+void Node::ToAssociative(std::list<Node *> &buffer)
+{
+    NodeType invType;
+
+    switch (Type) {
+    case SubTy:
+        Type = AddTy;
+        invType = AddInvTy;
+        break;
+    case DivTy:
+        Type = MulTy;
+        invType = MulInvTy;
+        break;
+    default:
+        return;
+    }
+
+    Node *inv = new Node(invType);
+    inv->AddPred(Pred.back());
+    Pred.back() = inv;
+    buffer.push_back(inv);
+}
+
+bool Node::IndexLessCompare::operator()(const Node *a, const Node *b) const
+{
+    if (a == b) {
+        return false;
+    }
+    return a->Index < b->Index;
+}
+
+/*bool Node::typeLessCompare::operator()(const Node *a, const Node *b) const
+{
+    if (a == b) {
+        return false;
+    }
+
+    if (a->TypeOf(b)) {
+        if (a->IsConstant()) {
+            return a->SubName < b->SubName;
+        }
+
+        // compare recursively when two nodes have the same type
+        const_node_iterator ia = a->PredBegin(), ea = a->PredEnd();
+        const_node_iterator ib = b->PredBegin(), eb = b->PredEnd();
+        for (; ia != ea && ib != eb; ++ia, ++ib) {
+            if (operator()(*ia, *ib)) {
+                return true;
+            }
+            if (operator()(*ib, *ia)) {
+                return false;
+            }
+            // continue comparing if *ia and *ib are equal
+        }
+
+        // When all operands are equal, node with less operands are
+        // considered smaller.
+        return a->Pred.size() < b->Pred.size();
+    }
+
+    // lable is always bigger than any other types
+    if (a->IsLabel()) {
+        if (b->IsLabel()) {
+            return a->Type < b->Type;
+        }
+        return false;
+    }
+    if (b->IsLabel()) {
+        return true;
+    }
+
+    return a->Type < b->Type;
+}*/
+
 void Node::Sort()
 {
 }
 
 void Node::WriteRPN(std::string &buffer) const
 {
-    if (Type == ConstTy) {
+    if (TypeOf(ConstTy)) {
         buffer.append(SubName);
+        return;
+    }
+    if (TypeOf(Order1Ty) || TypeOf(Order2Ty)) {
+        // label node has exactly one operand
+        (*PredBegin())->WriteRPN(buffer);
         return;
     }
 
@@ -252,8 +306,8 @@ void Node::WriteRPN(std::string &buffer) const
     }
     buffer.append(TypeName());
 
-    // For associative op, add a number to it when having variable operands.
     switch (Type) {
+    // add a number to associative ops with more than 2 operands
     CASE_ASSOCIATIVE:
         if (Pred.size() > 2) {
             std::stringstream buf;
@@ -284,4 +338,50 @@ raw_ostream &operator<<(raw_ostream &out, const Node &node)
     return out;
 }
 
+} // namespace aise
+
+namespace
+{
+
+bool inline compareTypeHash(const Node *a, const Node *b)
+{
+    return false;
+}
+
+struct typeHashAddrCompare {
+    bool operator()(const Node *a, const Node *b) const {
+        return false;
+    }
+};
+
+typedef std::set<Node *, typeHashAddrCompare> node_canon_set;
+
+} // namespace
+
+namespace aise
+{
+void CanonTopoSort(std::vector<Node *> &DAG, std::vector<size_t> &choice)
+{
+    node_canon_set leaf;
+    std::vector<Node *> sortedDAG;
+    sortedDAG.reserve(DAG.size());
+
+    {
+        std::vector<Node *>::iterator i = DAG.begin(), e = DAG.end();
+        for (; i != e; ++i) {
+            if ((*i)->Pred.empty()) {
+                leaf.insert(*i);
+            }
+        }
+    }
+
+    size_t choiceIndex = 0;
+
+    while (!leaf.empty()) {
+        node_canon_set::iterator i = leaf.begin(), e = leaf.end();
+        if (i != e) {
+            
+        }
+    }
+}
 } // namespace aise
