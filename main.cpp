@@ -1,6 +1,7 @@
 #include "node.h"
 #include "ioutils.h"
 #include "llvm/Support/CommandLine.h"
+#include <iostream>
 
 using namespace aise;
 using namespace llvm;
@@ -18,4 +19,5 @@ int main(int argc, char **argv)
     if (ParseBitcode(bitcodePath, buffer) < 0) {
         return -1;
     }
+    std::cin.get();
 }

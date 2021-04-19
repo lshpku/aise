@@ -55,10 +55,6 @@ class Node
         FirstInputTy,
     };
 
-    struct IndexLessCompare {
-        bool operator()(const Node *a, const Node *b) const;
-    };
-
     NodeType Type;
     std::list<Node *> Pred, Succ;
     size_t Index;
@@ -69,6 +65,7 @@ class Node
 
     static const char *TypeName(NodeType type);
     const char *TypeName() const { return TypeName(Type); }
+    void WriteTypeName(std::string &buffer) const;
 
     bool TypeOf(const Node *target) const { return target->Type == Type; }
     bool TypeOf(NodeType _type) const { return _type == Type; }
@@ -92,6 +89,14 @@ class Node
     const_node_iterator SuccBegin() const { return Succ.begin(); }
     const_node_iterator SuccEnd() const { return Succ.end(); }
 
+    struct LessIndexCompare {
+        bool operator()(const Node *a, const Node *b) const;
+    };
+
+    struct LessTypeCompare {
+        bool operator()(const Node *a, const Node *b) const;
+    };
+
   public:
     // RelaxOrder merges operands of associative ops (+, *, &, |, ^), and
     // adds order labels to non-commutative ops (-, /, %, shift, ?:, cmp).
@@ -112,9 +117,13 @@ class Node
     // WriteRPN writes the Reversed Polish notation of the expanding tree
     // of this node.
     void WriteRPN(std::string &buffer) const;
-};
 
-void CanonTopoSort(std::vector<Node *> &DAG, std::vector<size_t> choice);
+    // WriteRefRPN is like WriteRPN but uses reference when an operand has
+    // been represented before.
+    // index is the current index in RPN (starts from 1).
+    // Returns the new index.
+    size_t WriteRefRPN(std::string &buffer, size_t index = 1);
+};
 
 llvm::raw_ostream &operator<<(llvm::raw_ostream &out, Node::NodeType type);
 llvm::raw_ostream &operator<<(llvm::raw_ostream &out, const Node &node);

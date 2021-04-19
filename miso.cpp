@@ -14,9 +14,9 @@ using namespace llvm;
 namespace
 {
 
-typedef std::priority_queue<Node *, std::vector<Node *>, Node::IndexLessCompare> node_heap;
-typedef std::set<Node *, Node::IndexLessCompare> node_set;
-typedef std::map<Node *, Node *, Node::IndexLessCompare> node_node_map;
+typedef std::priority_queue<Node *, std::vector<Node *>, Node::LessIndexCompare> node_heap;
+typedef std::set<Node *, Node::LessIndexCompare> node_set;
+typedef std::map<Node *, Node *, Node::LessIndexCompare> node_node_map;
 
 void pushAllPred(Node *node, node_heap &buffer)
 {
@@ -94,7 +94,9 @@ class MISOContext
     node_set selected, inputs;
     int maxIn;
 
+    // inst in minimal PRN
     std::vector<std::string> uniqueInst;
+    // inst in each permutation of inputs
     StringMap<size_t> permutedInst;
 };
 
@@ -126,10 +128,33 @@ void yieldMISO(MISOContext &context)
     }
 
     // relax order
+    // also build succ relation to find unavailable nodes
     {
         node_node_map::iterator i = nodeMap.begin(), e = nodeMap.end();
         for (; i != e; ++i) {
             i->second->RelaxOrder(newNodes);
+            i->second->PropagateSucc();
+        }
+    }    
+    {
+        std::list<Node *>::iterator i = newNodes.begin(), e = newNodes.end();
+        for (; i != e; ++i) {
+            (*i)->PropagateSucc();
+        }
+    }
+
+    // Copy available nodes in nodeMap into newNodes to avoid redundant
+    // sorting, and delete those that are unavailable.
+    Node *root = nodeMap[context.upperCone[0]];
+    {
+        // add nodes in topological order
+        node_node_map::iterator i = nodeMap.begin(), e = nodeMap.end();
+        for (; i != e; ++i) {
+            if (i->second == root || i->second->Succ.size() > 0) {
+                newNodes.push_back(i->second);
+            } else {
+                delete i->second;
+            }
         }
     }
 
@@ -137,44 +162,43 @@ void yieldMISO(MISOContext &context)
     // For instructions like a single constant, the input number is 0 and
     // there is no permutation, thus no instruction is generated.
     Permutation perm(inputs.size());
-    std::string RPN;
-    Node *root = nodeMap[context.upperCone[0]];
-    for (bool isFirst = true; perm.HasNext(); isFirst = false) {
+    std::string RPN, minRPN;
+    while (perm.HasNext()) {
         const std::vector<size_t> &indexes = perm.Next();
         for (int i = indexes.size() - 1; i >= 0; i--) {
             inputs[i]->Type = (Node::NodeType)(indexes[i] + Node::FirstInputTy);
         }
 
         // call Sort() in topological order
+        // In fact, only nodes that are not labels are in order, but it
+        // doesn't matter since labels don't need sorting.
         {
-            node_node_map::iterator i = nodeMap.begin(), e = nodeMap.end();
-            for (; i != e; ++i) {
-                i->second->Sort();
+            std::list<Node *>::iterator i, e;
+            for (i = newNodes.begin(), e = newNodes.end(); i != e; ++i) {
+                (*i)->Sort();
+                (*i)->Index = 0;
             }
         }
 
         RPN.clear();
-        root->WriteRPN(RPN);
+        root->WriteRefRPN(RPN);
 
         if (context.permutedInst.find(RPN) != context.permutedInst.end()) {
             break; // inst exists
         }
-        if (isFirst) {
-            context.uniqueInst.push_back(RPN);
+        if (minRPN.empty() || RPN < minRPN) {
+            minRPN = RPN;
         }
         context.permutedInst[RPN] = context.uniqueInst.size() - 1;
+    }
+    if (!minRPN.empty()) {
+        context.uniqueInst.push_back(minRPN);
     }
 
     // delete new nodes
     {
-        node_node_map::iterator i = nodeMap.begin(), e = nodeMap.end();
-        for (; i != e; ++i) {
-            delete i->second;
-        }
-    }
-    {
-        std::list<Node *>::iterator i = newNodes.begin(), e = newNodes.end();
-        for (; i != e; ++i) {
+        std::list<Node *>::iterator i, e;
+        for (i = newNodes.begin(), e = newNodes.end(); i != e; ++i) {
             delete *i;
         }
     }

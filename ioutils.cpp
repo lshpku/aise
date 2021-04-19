@@ -82,12 +82,8 @@ void parseBasicBlock(const BasicBlock &bb, std::vector<BBDAG *> &buffer)
     // Build successor dependency
     {
         std::vector<Node *>::iterator i = nodes.begin(), e = nodes.end();
-        Node::const_node_iterator predIter, predEnd;
         for (; i != e; ++i) {
-            predIter = (*i)->PredBegin(), predEnd = (*i)->PredEnd();
-            for (; predIter != predEnd; ++predIter) {
-                (*predIter)->AddSucc(*i);
-            }
+            (*i)->PropagateSucc();
         }
     }
 

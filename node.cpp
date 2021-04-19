@@ -1,4 +1,5 @@
 #include "node.h"
+#include "ioutils.h"
 #include "llvm/IR/Constant.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/InstrTypes.h"
@@ -19,7 +20,6 @@ namespace aise
 const char *Node::TypeName(NodeType type)
 {
     const char *name;
-    static const char *inputName[] = {"%0", "%1", "%2", "%3", "%4"};
 
     switch (type) {
         NODE_TYPE_NAME(UnkTy, "unk");
@@ -54,16 +54,24 @@ const char *Node::TypeName(NodeType type)
         NODE_TYPE_NAME(Order2Ty, "[2]");
 
     default:
-        if (type - Node::FirstInputTy < 5) {
-            name = inputName[type - Node::FirstInputTy];
-        } else {
-            name = "...";
-        }
+        name = "$*";
     }
     return name;
 }
 
 #undef NODE_TYPE_NAME
+
+void Node::WriteTypeName(std::string &buffer) const
+{
+    if (Type >= FirstInputTy) {
+        buffer.push_back('$');
+        std::stringstream buf;
+        buf << Type - FirstInputTy + 1;
+        buffer.append(buf.str());
+    } else {
+        buffer.append(TypeName());
+    }
+}
 
 #define OPCODE_NODE_TYPE(o, t) \
     case Instruction::o:       \
@@ -151,6 +159,13 @@ Node *Node::FromTypeOfNode(const Node *target)
     return node;
 }
 
+void Node::PropagateSucc()
+{
+    for (const_node_iterator i = PredBegin(), e = PredEnd(); i != e; ++i) {
+        (*i)->AddSucc(this);
+    }
+}
+
 #define CASE_ASSOCIATIVE \
     case AddTy:          \
     case MulTy:          \
@@ -232,7 +247,7 @@ void Node::ToAssociative(std::list<Node *> &buffer)
     buffer.push_back(inv);
 }
 
-bool Node::IndexLessCompare::operator()(const Node *a, const Node *b) const
+bool Node::LessIndexCompare::operator()(const Node *a, const Node *b) const
 {
     if (a == b) {
         return false;
@@ -240,7 +255,7 @@ bool Node::IndexLessCompare::operator()(const Node *a, const Node *b) const
     return a->Index < b->Index;
 }
 
-/*bool Node::typeLessCompare::operator()(const Node *a, const Node *b) const
+bool Node::LessTypeCompare::operator()(const Node *a, const Node *b) const
 {
     if (a == b) {
         return false;
@@ -281,11 +296,9 @@ bool Node::IndexLessCompare::operator()(const Node *a, const Node *b) const
     }
 
     return a->Type < b->Type;
-}*/
-
-void Node::Sort()
-{
 }
+
+void Node::Sort() { Pred.sort(LessTypeCompare()); }
 
 void Node::WriteRPN(std::string &buffer) const
 {
@@ -299,7 +312,7 @@ void Node::WriteRPN(std::string &buffer) const
         return;
     }
 
-    Node::const_node_iterator i = PredBegin(), e = PredEnd();
+    const_node_iterator i = PredBegin(), e = PredEnd();
     for (; i != e; ++i) {
         (*i)->WriteRPN(buffer);
         buffer.push_back(' ');
@@ -318,10 +331,53 @@ void Node::WriteRPN(std::string &buffer) const
     }
 }
 
+size_t Node::WriteRefRPN(std::string &buffer, size_t index)
+{
+    if (TypeOf(ConstTy)) {
+        buffer.append(SubName);
+        Index = index;
+        return index + 1;
+    }
+    if (TypeOf(Order1Ty) || TypeOf(Order2Ty)) {
+        // label node doesn't take up space
+        return (*PredBegin())->WriteRefRPN(buffer, index);
+    }
+
+    node_iterator i = Pred.begin(), e = Pred.end();
+    for (; i != e; ++i) {
+        if ((*i)->Index > 0) {
+            buffer.push_back('@');
+            std::stringstream buf;
+            buf << (*i)->Index;
+            buffer.append(buf.str());
+            index++;
+        } else {
+            index = (*i)->WriteRefRPN(buffer, index);
+        }
+        buffer.push_back(' ');
+    }
+
+    WriteTypeName(buffer);
+
+    switch (Type) {
+    // add a number to associative ops with more than 2 operands
+    CASE_ASSOCIATIVE:
+        if (Pred.size() > 2) {
+            std::stringstream buf;
+            buf << Pred.size();
+            buffer.append(buf.str());
+        }
+        break;
+    }
+
+    Index = index;
+    return index + 1;
+}
+
 raw_ostream &operator<<(raw_ostream &out, Node::NodeType type)
 {
     if (type >= Node::FirstInputTy) {
-        out << '%' << type - Node::FirstInputTy;
+        out << '$' << type - Node::FirstInputTy + 1;
     } else {
         out << Node::TypeName(type);
     }
@@ -338,50 +394,4 @@ raw_ostream &operator<<(raw_ostream &out, const Node &node)
     return out;
 }
 
-} // namespace aise
-
-namespace
-{
-
-bool inline compareTypeHash(const Node *a, const Node *b)
-{
-    return false;
-}
-
-struct typeHashAddrCompare {
-    bool operator()(const Node *a, const Node *b) const {
-        return false;
-    }
-};
-
-typedef std::set<Node *, typeHashAddrCompare> node_canon_set;
-
-} // namespace
-
-namespace aise
-{
-void CanonTopoSort(std::vector<Node *> &DAG, std::vector<size_t> &choice)
-{
-    node_canon_set leaf;
-    std::vector<Node *> sortedDAG;
-    sortedDAG.reserve(DAG.size());
-
-    {
-        std::vector<Node *>::iterator i = DAG.begin(), e = DAG.end();
-        for (; i != e; ++i) {
-            if ((*i)->Pred.empty()) {
-                leaf.insert(*i);
-            }
-        }
-    }
-
-    size_t choiceIndex = 0;
-
-    while (!leaf.empty()) {
-        node_canon_set::iterator i = leaf.begin(), e = leaf.end();
-        if (i != e) {
-            
-        }
-    }
-}
 } // namespace aise
