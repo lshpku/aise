@@ -1,5 +1,4 @@
 #include "ioutils.h"
-#include "miso.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/Bitcode/ReaderWriter.h"
 #include "llvm/IR/Constant.h"
@@ -10,8 +9,8 @@
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/raw_os_ostream.h"
 #include "llvm/Support/system_error.h"
-#include <vector>
 #include <queue>
+#include <sstream>
 
 using namespace aise;
 using namespace llvm;
@@ -21,11 +20,9 @@ namespace
 
 typedef DenseMap<Value const *, Node *> value_node_map;
 
-void parseBasicBlock(const BasicBlock &bb, std::vector<BBDAG *> &buffer)
+NodeArray *parseBasicBlock(const BasicBlock &bb)
 {
-    outs() << "  " << bb.getName() << ":\n";
-
-    std::vector<Node *> nodes;
+    NodeArray *DAGPtr = new NodeArray(), &DAG = *DAGPtr;
     value_node_map nodeMap;
 
     BasicBlock::const_iterator instIter = bb.begin(), instEnd = bb.end();
@@ -43,9 +40,9 @@ void parseBasicBlock(const BasicBlock &bb, std::vector<BBDAG *> &buffer)
             // constant, it would not be found.
             if (opNode == nodeMap.end()) {
                 Node *virtIn = Node::FromValue(*opIter);
-                virtIn->Index = nodes.size();
+                virtIn->Index = DAG.size();
                 node->AddPred(virtIn);
-                nodes.push_back(virtIn);
+                DAG.push_back(virtIn);
                 nodeMap[*opIter] = virtIn;
             } else {
                 node->AddPred(opNode->second);
@@ -69,25 +66,25 @@ void parseBasicBlock(const BasicBlock &bb, std::vector<BBDAG *> &buffer)
         }
 
         // Add node to dag
-        node->Index = nodes.size();
+        node->Index = DAG.size();
         nodeMap[&inst] = node;
-        nodes.push_back(node);
+        DAG.push_back(node);
         if (virtSucc) {
-            virtSucc->Index = nodes.size();
+            virtSucc->Index = DAG.size();
             virtSucc->AddPred(node);
-            nodes.push_back(virtSucc);
+            DAG.push_back(virtSucc);
         }
     }
 
     // Build successor dependency
     {
-        std::vector<Node *>::iterator i = nodes.begin(), e = nodes.end();
+        std::vector<Node *>::iterator i = DAG.begin(), e = DAG.end();
         for (; i != e; ++i) {
             (*i)->PropagateSucc();
         }
     }
 
-    EnumerateMISO(nodes, 2);
+    return DAGPtr;
 }
 
 } // namespace
@@ -95,12 +92,7 @@ void parseBasicBlock(const BasicBlock &bb, std::vector<BBDAG *> &buffer)
 namespace aise
 {
 
-void BBDAG::Sort()
-{
-    std::reverse(nodes.begin(), nodes.end());
-}
-
-int ParseBitcode(Twine path, std::vector<BBDAG *> &buffer)
+int ParseBitcode(Twine path, std::list<NodeArray *> &buffer)
 {
     OwningPtr<MemoryBuffer> bitcodeBuffer;
     error_code getFileErr = MemoryBuffer::getFile(path, bitcodeBuffer);
@@ -116,21 +108,76 @@ int ParseBitcode(Twine path, std::vector<BBDAG *> &buffer)
         return -1;
     }
 
+    int bbCount = 0;
     Module::const_iterator funcIter = mod->getFunctionList().begin(),
                            funcEnd = mod->getFunctionList().end();
     for (; funcIter != funcEnd; ++funcIter) {
         if (funcIter->isDeclaration()) {
             continue;
         }
-        outs() << "func " << funcIter->getName() << " {\n";
         Function::const_iterator bbIter = funcIter->getBasicBlockList().begin(),
                                  bbEnd = funcIter->getBasicBlockList().end();
-        for (; bbIter != bbEnd; ++bbIter) {
-            parseBasicBlock(*bbIter, buffer);
+        for (; bbIter != bbEnd; ++bbIter, ++bbCount) {
+            buffer.push_back(parseBasicBlock(*bbIter));
         }
-        outs() << "}\n";
     }
+    return bbCount;
+}
+
+#define NOT_AN_INTEGER errs() << "Not an integer: " << str << '\n'
+
+int ParseInt(std::string &str, int &buffer)
+{
+    if (str.empty()) {
+        NOT_AN_INTEGER;
+        return -1;
+    }
+
+    size_t i = 0, e = str.size();
+    bool positive;
+    if (str[i] == '-') {
+        if (++i == e) {
+            NOT_AN_INTEGER;
+            return -1;
+        }
+        positive = false;
+    } else {
+        positive = true;
+    }
+
+    int sum = 0;
+    for (; i != e; i++) {
+        int val = str[i] - '0';
+        if (val < 0 || val > 9) {
+            NOT_AN_INTEGER;
+            return -1;
+        }
+        sum = sum * 10;
+        sum += val;
+    }
+
+    buffer = positive ? sum : -sum;
     return 0;
+}
+
+#undef NOT_AN_INTEGER
+
+OutFile *OutFile::Create(const char *path)
+{
+    std::string err;
+    tool_output_file *out = new tool_output_file(path, err);
+    if (!err.empty()) {
+        errs() << err << '\n';
+        return NULL;
+    }
+    return new OutFile(out);
+}
+
+void OutFile::Close()
+{
+    out->keep();
+    delete out;
+    out = NULL;
 }
 
 } // namespace aise
