@@ -1,10 +1,10 @@
 #ifndef AISE_NODE_H
 #define AISE_NODE_H
 
-#include <string>
-#include <list>
 #include "llvm/IR/Instruction.h"
 #include "llvm/Support/raw_os_ostream.h"
+#include <string>
+#include <list>
 
 namespace aise
 {

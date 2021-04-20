@@ -218,9 +218,6 @@ void Node::RelaxOrder(std::list<Node *> &buffer)
             }
         }
     } break;
-
-    default:
-        break;
     }
 }
 
@@ -333,6 +330,14 @@ void Node::WriteRPN(std::string &buffer) const
 
 size_t Node::WriteRefRPN(std::string &buffer, size_t index)
 {
+    if (Index > 0) {
+        buffer.push_back('@');
+        std::stringstream buf;
+        buf << Index;
+        buffer.append(buf.str());
+        return index + 1;
+    }
+
     if (TypeOf(ConstTy)) {
         buffer.append(SubName);
         Index = index;
@@ -345,18 +350,9 @@ size_t Node::WriteRefRPN(std::string &buffer, size_t index)
 
     node_iterator i = Pred.begin(), e = Pred.end();
     for (; i != e; ++i) {
-        if ((*i)->Index > 0) {
-            buffer.push_back('@');
-            std::stringstream buf;
-            buf << (*i)->Index;
-            buffer.append(buf.str());
-            index++;
-        } else {
-            index = (*i)->WriteRefRPN(buffer, index);
-        }
+        index = (*i)->WriteRefRPN(buffer, index);
         buffer.push_back(' ');
     }
-
     WriteTypeName(buffer);
 
     switch (Type) {

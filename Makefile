@@ -3,7 +3,7 @@ LDFLAGS+=$(shell llvm-config --ldflags)
 CXXFLAGS+=$(shell llvm-config --cxxflags)
 CPPFLAGS+=$(shell llvm-config --cppflags)
 
-LLVMLIBS=$(shell llvm-config --libs bitreader bitwriter core support)
+LLVMLIBS=$(shell llvm-config --libs bitreader core support)
 
 OBJECTS=main.o node.o ioutils.o miso.o
 
