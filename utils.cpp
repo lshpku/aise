@@ -1,4 +1,5 @@
 #include "utils.h"
+#include "miso.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/Bitcode/ReaderWriter.h"
 #include "llvm/IR/Constant.h"
@@ -88,11 +89,6 @@ NodeArray *parseBasicBlock(const BasicBlock &bb)
     return DAGPtr;
 }
 
-// completeDAG inserts label nodes and propagates successing relation.
-void completeDAG(NodeArray *DAG)
-{
-}
-
 } // namespace
 
 namespace aise
@@ -141,18 +137,27 @@ int ParseMISO(llvm::Twine path, std::list<NodeArray *> &buffer)
         errs() << path << ": " << getFileErr.message() << '\n';
         return -1;
     }
-    StringRef fileRef = fileBuffer->getBuffer();
 
-    size_t lastEOL = 0, lineNum = 1, tokenNum;
+    StringRef fileRef = fileBuffer->getBuffer(), lineRef;
+    size_t EOL = 0, lineNum = 1, tokenNum;
     std::string token, fromTokenErr;
 
-    while (true) {
-        size_t nextEOL = fileRef.find('\n', lastEOL);
+    for (; EOL != StringRef::npos; lineNum++) {
+        size_t nextEOL = fileRef.find('\n', EOL);
         if (nextEOL == StringRef::npos) {
-            break;
+            lineRef = fileRef.substr(EOL);
+            EOL = nextEOL;
+        } else {
+            lineRef = fileRef.substr(EOL, nextEOL - EOL);
+            EOL = nextEOL + 1;
         }
-        std::stringstream line(
-            fileRef.substr(lastEOL, nextEOL - lastEOL).str());
+        
+        lineRef = lineRef.trim();
+        if (lineRef.empty()) {
+            continue;
+        }
+        std::stringstream line(lineRef.str());
+
         // RPN holds nodes in the same order as in input text. There may be
         // replicated nodes when meets an "@".
         NodeArray RPN, stack;
@@ -168,8 +173,9 @@ int ParseMISO(llvm::Twine path, std::list<NodeArray *> &buffer)
                     PARSE_MISO_POS << "invalid ref: " << token << '\n';
                     return -1;
                 }
-                if (value < 1) {
-                    PARSE_MISO_POS << "Ref index too small: " << value << '\n';
+                if (value < 1 || value > RPN.size()) {
+                    PARSE_MISO_POS << "Ref index out of bound: "
+                                   << token << '\n';
                     return -1;
                 }
                 Node *node = RPN[value - 1];
@@ -207,11 +213,57 @@ int ParseMISO(llvm::Twine path, std::list<NodeArray *> &buffer)
             PARSE_MISO_POS << "Too many outputs\n";
             return -1;
         }
+
+        LegalizeDAG(DAG);
         buffer.push_back(DAG);
-        lastEOL = nextEOL + 1;
-        lineNum++;
     }
-    return 0;
+    return lineNum;
+}
+
+#define PARSE_CONF_POS errs() << "At line " << lineNum << ": "
+
+int ParseConf(llvm::Twine path, std::list<size_t> &buffer)
+{
+    OwningPtr<MemoryBuffer> fileBuffer;
+    error_code getFileErr = MemoryBuffer::getFile(path, fileBuffer);
+    if (getFileErr != error_code::success()) {
+        errs() << path << ": " << getFileErr.message() << '\n';
+        return -1;
+    }
+    StringRef fileRef = fileBuffer->getBuffer(), lineRef;
+    size_t EOL = 0, lineNum = 1;
+
+    for (; EOL != StringRef::npos; lineNum++) {
+        size_t nextEOL = fileRef.find('\n', EOL);
+        if (nextEOL == StringRef::npos) { // last line
+            lineRef = fileRef.substr(EOL);
+            EOL = nextEOL;
+        } else {
+            lineRef = fileRef.substr(EOL, nextEOL - EOL);
+            EOL = nextEOL + 1;
+        }
+
+        lineRef = lineRef.trim();
+        if (lineRef.empty()) {
+            continue;
+        }
+
+        size_t eqIndex = lineRef.find('=');
+        if (eqIndex == StringRef::npos) {
+            PARSE_CONF_POS << "Incomplete line: Missing '='\n";
+            return -1;
+        }
+
+        StringRef valueRef = lineRef.substr(eqIndex + 1).trim();
+        int value;
+        if (ParseInt(valueRef.str(), value) < 0) {
+            PARSE_CONF_POS << "Invalid value: " << valueRef << '\n';
+            return -1;
+        }
+
+        buffer.push_back(value);
+    }
+    return lineNum;
 }
 
 int ParseInt(const std::string &str, int &buffer)
@@ -253,18 +305,18 @@ std::string ToString(int a)
     return buf.str();
 }
 
-OutFile *OutFile::Create(const char *path)
+OutFile::OutFile(const char *path)
 {
     std::string err;
-    tool_output_file *out = new tool_output_file(path, err);
+    out = new tool_output_file(path, err);
     if (!err.empty()) {
         errs() << err << '\n';
-        return NULL;
+        delete out;
+        out = NULL;
     }
-    return new OutFile(out);
 }
 
-void OutFile::Close()
+OutFile::~OutFile()
 {
     out->keep();
     delete out;

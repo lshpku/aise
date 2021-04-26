@@ -45,6 +45,11 @@ class MISOEnumerator
     void Save(llvm::raw_ostream &out);
 };
 
+// LegalizeDAG inserts ordering labels before non-associative ops, then
+// assignes indexes and builds successing relationship.
+// Nodes in DAG keep topological order after processing.
+void LegalizeDAG(NodeArray *DAG);
+
 class MISOInstr
 {
     // nodes are in topological order, i.e., root at the back

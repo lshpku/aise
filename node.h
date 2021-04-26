@@ -86,6 +86,8 @@ class Node
     // assign right values to them.
     // If token is invalid, this method returns NULL and sets error.
     static Node *FromToken(const std::string &token, std::string &error);
+    template <typename T>
+    static Node *FromType(T type) { return new Node((NodeType)type); }
 
     // Delete deletes the node.
     // This method will call the right deconstructor. Always use this one

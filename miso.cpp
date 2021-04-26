@@ -285,4 +285,32 @@ void MISOEnumerator::Save(raw_ostream &out)
     }
 }
 
+void LegalizeDAG(NodeArray *DAG)
+{
+    NodeArray legalDAG;
+    NodeArray::iterator i = DAG->begin(), e = DAG->end();
+
+    for (; i != e; ++i) {
+        size_t size = (*i)->Pred.size();
+        if (!(*i)->IsAssociative() && size > 1) {
+            std::list<Node *>::iterator p = (*i)->Pred.begin();
+            size_t index = 1;
+            for (++p; index < size && index < 3; index++) {
+                Node *label = Node::FromType(Node::Order1Ty + index - 1);
+                label->AddPred(*p);
+                *p = label;
+                legalDAG.push_back(label);
+            }
+        }
+        legalDAG.push_back(*i);
+    }
+
+    for (size_t index = 0, size = legalDAG.size(); index < size; index++) {
+        legalDAG[index]->Index = index;
+        legalDAG[index]->PropagateSucc();
+    }
+
+    DAG->swap(legalDAG);
+}
+
 } // namespace aise
