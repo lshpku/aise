@@ -1,5 +1,5 @@
 #include "node.h"
-#include "ioutils.h"
+#include "utils.h"
 #include "llvm/IR/Constant.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/InstrTypes.h"
@@ -59,8 +59,6 @@ const char *Node::TypeName(NodeType type)
     return name;
 }
 
-#undef NODE_TYPE_NAME
-
 void Node::WriteTypeName(std::string &buffer) const
 {
     if (Type >= FirstInputTy) {
@@ -70,6 +68,23 @@ void Node::WriteTypeName(std::string &buffer) const
         buffer.append(buf.str());
     } else {
         buffer.append(TypeName());
+    }
+}
+
+#define CASE_ASSOCIATIVE \
+    case AddTy:          \
+    case MulTy:          \
+    case AndTy:          \
+    case OrTy:           \
+    case XorTy
+
+bool Node::IsAssociative() const
+{
+    switch (Type) {
+    CASE_ASSOCIATIVE:
+        return true;
+    default:
+        return false;
     }
 }
 
@@ -133,30 +148,149 @@ Node *Node::FromInstruction(const Instruction *inst)
     return new Node(type);
 }
 
-#undef OPCODE_NODE_TYPE
-#undef PRED_NODE_TYPE
-
 Node *Node::FromValue(const Value *val)
 {
     if (!Constant::classof(val)) {
         return new Node(); // unk
     }
-    Node *node = new Node(ConstTy);
+    ConstNode *node = new ConstNode();
     if (val->getType()->isIntegerTy()) {
-        node->SubName = ((const Constant *)val)->getUniqueInteger().toString(10, true);
+        node->Value = ((const Constant *)val)->getUniqueInteger().toString(10, true);
     } else {
-        node->SubName = "inf";
+        node->Value = "inf";
     }
     return node;
 }
 
 Node *Node::FromTypeOfNode(const Node *target)
 {
-    Node *node = new Node(target->Type);
-    if (target->Type == ConstTy) {
-        node->SubName = target->SubName;
+    if (target->TypeOf(ConstTy)) {
+        return new ConstNode(ConstNode::ValueOf(target));
     }
+    return new Node(target->Type);
+}
+
+#define CASE_TOKEN_TYPE(c, t) \
+    case c:                   \
+        type = t;             \
+        break
+
+#define MATCH_TOKEN_TYPE(m, t) \
+    if (token == m) {          \
+        type = t;              \
+        break;                 \
+    }
+
+Node *Node::FromToken(const std::string &token, std::string &error)
+{
+    if (token.empty()) {
+        error = "Empty token";
+        return NULL;
+    }
+    int value;
+    if (ParseInt(token, value) == 0) {
+        return new ConstNode(token);
+    }
+
+    // decide by the first char
+    NodeType type = UnkTy;
+    switch (token[0]) {
+        CASE_TOKEN_TYPE('+', AddTy);
+        CASE_TOKEN_TYPE('-', SubTy);
+        CASE_TOKEN_TYPE('/', DivTy);
+        CASE_TOKEN_TYPE('%', RemTy);
+        CASE_TOKEN_TYPE('&', AndTy);
+        CASE_TOKEN_TYPE('|', OrTy);
+
+    case '*':
+        MATCH_TOKEN_TYPE("*-1", AddInvTy)
+        type = MulTy;
+        break;
+    case '^':
+        MATCH_TOKEN_TYPE("^-1", MulInvTy)
+        type = XorTy;
+        break;
+    case '<':
+        MATCH_TOKEN_TYPE("<", LtTy)
+        MATCH_TOKEN_TYPE("<=", LeTy)
+        MATCH_TOKEN_TYPE("<<", ShlTy)
+        break;
+    case '>':
+        MATCH_TOKEN_TYPE(">", GtTy)
+        MATCH_TOKEN_TYPE(">=", GeTy)
+        MATCH_TOKEN_TYPE(">>", AshrTy)
+        MATCH_TOKEN_TYPE(">>>", LshrTy)
+        break;
+    case '=':
+        MATCH_TOKEN_TYPE("==", EqTy);
+        break;
+    case '!':
+        MATCH_TOKEN_TYPE("!=", NeTy);
+        break;
+    case '?':
+        MATCH_TOKEN_TYPE("?:", SelectTy);
+        break;
+
+    case '$':
+        if (ParseInt(token.substr(1), value) < 0) {
+            error = "Invalid input index: ";
+            error.append(token);
+            return NULL;
+        }
+        if (value < 1) {
+            error = "Input index too small: ";
+            error.append(token);
+            return NULL;
+        }
+        return new Node((NodeType)(FirstInputTy + value - 1));
+    }
+
+    if (type == UnkTy) {
+        error = "Unknown token: ";
+        error.append(token);
+        return NULL;
+    }
+
+    // decide number of preds
+    size_t predCnt = 2;
+    switch (type) {
+    CASE_ASSOCIATIVE:
+        if (token.size() > 1) {
+            if (ParseInt(token.substr(1), value) < 0) {
+                error = "Invalid pred identifier: ";
+                error.append(token);
+                return NULL;
+            }
+            if (value <= 2) {
+                error = "Pred identifier too small: ";
+                error.append(token);
+                return NULL;
+            }
+            predCnt = value;
+        }
+        break;
+
+    case AddInvTy:
+    case MulInvTy:
+        predCnt = 1;
+        break;
+    case SelectTy:
+        predCnt = 3;
+        break;
+    }
+
+    Node *node = new Node(type);
+    node->Pred.resize(predCnt);
     return node;
+}
+
+void Node::Delete(Node *node)
+{
+    if (node->TypeOf(ConstTy)) {
+        delete (ConstNode *)node;
+    } else {
+        delete node;
+    }
 }
 
 void Node::PropagateSucc()
@@ -165,13 +299,6 @@ void Node::PropagateSucc()
         (*i)->AddSucc(this);
     }
 }
-
-#define CASE_ASSOCIATIVE \
-    case AddTy:          \
-    case MulTy:          \
-    case AndTy:          \
-    case OrTy:           \
-    case XorTy
 
 #define CASE_CMP \
     case EqTy:   \
@@ -260,7 +387,7 @@ bool Node::LessTypeCompare::operator()(const Node *a, const Node *b) const
 
     if (a->TypeOf(b)) {
         if (a->IsConstant()) {
-            return a->SubName < b->SubName;
+            return ConstNode::ValueOf(a) < ConstNode::ValueOf(b);
         }
 
         // compare recursively when two nodes have the same type
@@ -300,7 +427,7 @@ void Node::Sort() { Pred.sort(LessTypeCompare()); }
 void Node::WriteRPN(std::string &buffer) const
 {
     if (TypeOf(ConstTy)) {
-        buffer.append(SubName);
+        buffer.append(ConstNode::ValueOf(this));
         return;
     }
     if (TypeOf(Order1Ty) || TypeOf(Order2Ty)) {
@@ -339,7 +466,7 @@ size_t Node::WriteRefRPN(std::string &buffer, size_t index)
     }
 
     if (TypeOf(ConstTy)) {
-        buffer.append(SubName);
+        buffer.append(ConstNode::ValueOf(this));
         Index = index;
         return index + 1;
     }

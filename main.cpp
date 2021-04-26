@@ -1,5 +1,5 @@
 #include "node.h"
-#include "ioutils.h"
+#include "utils.h"
 #include "miso.h"
 #include "llvm/Support/CommandLine.h"
 
@@ -15,6 +15,9 @@ cl::opt<std::string> maxInput("max-input", cl::desc("Specify max input (default 
 
 int main(int argc, char **argv)
 {
+    std::list<NodeArray *> buffer0;
+    ParseMISO("result.miso.txt", buffer0);
+    return 0;
     cl::ParseCommandLineOptions(argc, argv, "AISE: Automatic Instruction Set Extension");
 
     std::list<NodeArray *> buffer;
@@ -24,6 +27,7 @@ int main(int argc, char **argv)
 
     int maxInputVal;
     if (ParseInt(maxInput, maxInputVal) < 0) {
+        errs() << "Not an integer: " << maxInput << '\n';
         return -1;
     }
     if (maxInputVal <= 0) {

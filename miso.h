@@ -1,7 +1,7 @@
 #ifndef AISE_MISO_H
 #define AISE_MISO_H
 
-#include "ioutils.h"
+#include "node.h"
 #include "llvm/ADT/StringMap.h"
 #include <vector>
 #include <set>
@@ -43,19 +43,19 @@ class MISOEnumerator
     void Enumerate(const NodeArray *DAG);
 
     void Save(llvm::raw_ostream &out);
+};
 
-  private:
-    class Permutation
-    {
-        std::vector<size_t> index;
-        std::vector<size_t> status;
+class MISOInstr
+{
+    // nodes are in topological order, i.e., root at the back
+    NodeArray nodes;
+    // inputs are in the order that when assigned from 1 to N, the RPN
+    // is exactly minimal
+    NodeArray inputs;
+    std::string rpn;
 
-      public:
-        Permutation(size_t n);
-
-        bool HasNext() const { return !status.empty(); }
-        const std::vector<size_t> &Next();
-    };
+  public:
+    const std::string &GetRPN() const { return rpn; }
 };
 
 } // namespace aise

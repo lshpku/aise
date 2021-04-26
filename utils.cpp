@@ -1,4 +1,4 @@
-#include "ioutils.h"
+#include "utils.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/Bitcode/ReaderWriter.h"
 #include "llvm/IR/Constant.h"
@@ -11,6 +11,7 @@
 #include "llvm/Support/system_error.h"
 #include <queue>
 #include <sstream>
+#include <fstream>
 
 using namespace aise;
 using namespace llvm;
@@ -87,6 +88,11 @@ NodeArray *parseBasicBlock(const BasicBlock &bb)
     return DAGPtr;
 }
 
+// completeDAG inserts label nodes and propagates successing relation.
+void completeDAG(NodeArray *DAG)
+{
+}
+
 } // namespace
 
 namespace aise
@@ -124,12 +130,93 @@ int ParseBitcode(Twine path, std::list<NodeArray *> &buffer)
     return bbCount;
 }
 
-#define NOT_AN_INTEGER errs() << "Not an integer: " << str << '\n'
+#define PARSE_MISO_POS \
+    errs() << "At line " << lineNum << ", token " << tokenNum << ": "
 
-int ParseInt(std::string &str, int &buffer)
+int ParseMISO(llvm::Twine path, std::list<NodeArray *> &buffer)
+{
+    OwningPtr<MemoryBuffer> fileBuffer;
+    error_code getFileErr = MemoryBuffer::getFile(path, fileBuffer);
+    if (getFileErr != error_code::success()) {
+        errs() << path << ": " << getFileErr.message() << '\n';
+        return -1;
+    }
+    StringRef fileRef = fileBuffer->getBuffer();
+
+    size_t lastEOL = 0, lineNum = 1, tokenNum;
+    std::string token, fromTokenErr;
+
+    while (true) {
+        size_t nextEOL = fileRef.find('\n', lastEOL);
+        if (nextEOL == StringRef::npos) {
+            break;
+        }
+        std::stringstream line(
+            fileRef.substr(lastEOL, nextEOL - lastEOL).str());
+        // RPN holds nodes in the same order as in input text. There may be
+        // replicated nodes when meets an "@".
+        NodeArray RPN, stack;
+        // DAG is the formal representation of the instruction. It contains
+        // invisible nodes like ordering labels.
+        NodeArray *DAG = new NodeArray();
+
+        for (tokenNum = 1; line >> token; tokenNum++) {
+            // For ref node, push into stack but don't add to DAG.
+            if (token[0] == '@') {
+                int value;
+                if (ParseInt(token.substr(1), value) < 0) {
+                    PARSE_MISO_POS << "invalid ref: " << token << '\n';
+                    return -1;
+                }
+                if (value < 1) {
+                    PARSE_MISO_POS << "Ref index too small: " << value << '\n';
+                    return -1;
+                }
+                Node *node = RPN[value - 1];
+                RPN.push_back(node);
+                stack.push_back(node);
+            }
+
+            // For real node, replace into stack and add to DAG.
+            else {
+                Node *node = Node::FromToken(token, fromTokenErr);
+                if (!node) {
+                    PARSE_MISO_POS << fromTokenErr << '\n';
+                    return -1;
+                }
+                RPN.push_back(node);
+                DAG->push_back(node);
+                // set pred for node
+                std::list<Node *>::reverse_iterator
+                    i = node->Pred.rbegin(),
+                    e = node->Pred.rend();
+                for (; i != e; ++i) {
+                    if (stack.empty()) {
+                        PARSE_MISO_POS << "Stack pop out\n";
+                        return -1;
+                    }
+                    *i = stack.back();
+                    stack.pop_back();
+                }
+                stack.push_back(node);
+            }
+        }
+
+        if (stack.size() > 1) {
+            tokenNum--;
+            PARSE_MISO_POS << "Too many outputs\n";
+            return -1;
+        }
+        buffer.push_back(DAG);
+        lastEOL = nextEOL + 1;
+        lineNum++;
+    }
+    return 0;
+}
+
+int ParseInt(const std::string &str, int &buffer)
 {
     if (str.empty()) {
-        NOT_AN_INTEGER;
         return -1;
     }
 
@@ -137,7 +224,6 @@ int ParseInt(std::string &str, int &buffer)
     bool positive;
     if (str[i] == '-') {
         if (++i == e) {
-            NOT_AN_INTEGER;
             return -1;
         }
         positive = false;
@@ -149,7 +235,6 @@ int ParseInt(std::string &str, int &buffer)
     for (; i != e; i++) {
         int val = str[i] - '0';
         if (val < 0 || val > 9) {
-            NOT_AN_INTEGER;
             return -1;
         }
         sum = sum * 10;
@@ -160,7 +245,13 @@ int ParseInt(std::string &str, int &buffer)
     return 0;
 }
 
-#undef NOT_AN_INTEGER
+std::string ToString(int a)
+{
+    static std::stringstream buf;
+    buf.clear();
+    buf << a;
+    return buf.str();
+}
 
 OutFile *OutFile::Create(const char *path)
 {
@@ -178,6 +269,47 @@ void OutFile::Close()
     out->keep();
     delete out;
     out = NULL;
+}
+
+Permutation::Permutation(size_t n)
+{
+    index.resize(n);
+    for (size_t i = 0; i < n; i++) {
+        index[i] = i;
+    }
+    status.reserve(n);
+    if (n > 0) {
+        status.push_back(0);
+    }
+}
+
+const std::vector<size_t> &Permutation::Next()
+{
+    // push status until full
+    while (status.size() < index.size()) {
+        status.push_back(0);
+    }
+
+    // pop status until one is increased or empty
+    while (!status.empty()) {
+        size_t i = status.size() - 1;
+        if (status.back() == index.size() - status.size()) {
+            status.pop_back();
+            size_t lastIndex = index[i];
+            for (; i < index.size() - 1; i++) {
+                index[i] = index[i + 1];
+            }
+            index[i] = lastIndex;
+        } else {
+            status[i]++;
+            size_t tmp = index[i];
+            index[i] = index[i + status[i]];
+            index[i + status[i]] = tmp;
+            break;
+        }
+    }
+
+    return index;
 }
 
 } // namespace aise

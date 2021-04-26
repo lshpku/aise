@@ -1,6 +1,6 @@
 #include "node.h"
 #include "miso.h"
-#include "ioutils.h"
+#include "utils.h"
 #include "llvm/Support/raw_os_ostream.h"
 #include <vector>
 #include <map>
@@ -139,7 +139,7 @@ void MISOEnumerator::yield(Context &context)
             if (i->second == root || i->second->Succ.size() > 0) {
                 newNodes.push_back(i->second);
             } else {
-                delete i->second;
+                Node::Delete(i->second);
             }
         }
     }
@@ -185,7 +185,7 @@ void MISOEnumerator::yield(Context &context)
     {
         std::list<Node *>::iterator i, e;
         for (i = newNodes.begin(), e = newNodes.end(); i != e; ++i) {
-            delete *i;
+            Node::Delete(*i);
         }
     }
 }
@@ -283,47 +283,6 @@ void MISOEnumerator::Save(raw_ostream &out)
     for (i = uniqueInsts.begin(), e = uniqueInsts.end(); i != e; ++i) {
         out << *i << '\n';
     }
-}
-
-MISOEnumerator::Permutation::Permutation(size_t n)
-{
-    index.resize(n);
-    for (size_t i = 0; i < n; i++) {
-        index[i] = i;
-    }
-    status.reserve(n);
-    if (n > 0) {
-        status.push_back(0);
-    }
-}
-
-const std::vector<size_t> &MISOEnumerator::Permutation::Next()
-{
-    // push status until full
-    while (status.size() < index.size()) {
-        status.push_back(0);
-    }
-
-    // pop status until one is increased or empty
-    while (!status.empty()) {
-        size_t i = status.size() - 1;
-        if (status.back() == index.size() - status.size()) {
-            status.pop_back();
-            size_t lastIndex = index[i];
-            for (; i < index.size() - 1; i++) {
-                index[i] = index[i + 1];
-            }
-            index[i] = lastIndex;
-        } else {
-            status[i]++;
-            size_t tmp = index[i];
-            index[i] = index[i + status[i]];
-            index[i + status[i]] = tmp;
-            break;
-        }
-    }
-
-    return index;
 }
 
 } // namespace aise
