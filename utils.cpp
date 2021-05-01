@@ -126,8 +126,9 @@ int ParseBitcode(Twine path, std::list<NodeArray *> &buffer)
     return bbCount;
 }
 
-#define PARSE_MISO_POS \
-    errs() << "At line " << lineNum << ", token " << tokenNum << ": "
+#define PARSE_MISO_POS                        \
+    errs() << path << ": At line " << lineNum \
+           << ", token " << tokenNum << ": "
 
 int ParseMISO(llvm::Twine path, std::list<NodeArray *> &buffer)
 {
@@ -220,7 +221,7 @@ int ParseMISO(llvm::Twine path, std::list<NodeArray *> &buffer)
     return lineNum;
 }
 
-#define PARSE_CONF_POS errs() << "At line " << lineNum << ": "
+#define PARSE_CONF_POS errs() << path << ": At line " << lineNum << ": "
 
 int ParseConf(llvm::Twine path, std::list<size_t> &buffer)
 {

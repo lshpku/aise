@@ -192,7 +192,6 @@ class IntriNode : public Node
   public:
     std::string RefRPN; // empty for default tile
     size_t Cost;
-    std::list<Node *> Covering; // not include inputs
 
     IntriNode() : Node(IntriTy), Cost(0) {}
 

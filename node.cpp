@@ -542,7 +542,6 @@ IntriNode *IntriNode::TileOfNode(Node *node)
 {
     IntriNode *tile = new IntriNode();
     tile->Pred = node->Pred;
-    tile->Covering.push_back(node);
 
     if (node->TypeOf(IntriTy)) {
         tile->Cost = ((IntriNode *)node)->Cost;

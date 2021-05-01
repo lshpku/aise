@@ -65,9 +65,7 @@ class MISOSelector
         // in the same order of nodes in DAG
         std::vector<IntriNode *> BestTile;
         std::vector<size_t> MinCost;
-        std::vector<bool> Fixed;
         std::vector<bool> Matched;
-        std::vector<IndexSet> CoveredBy;
     };
 
     // buttomUp traverses in topological order to decide the locally best
@@ -87,8 +85,9 @@ class MISOSelector
     // Note: DAG should be legalized.
     void AddInstr(const NodeArray *DAG);
 
-    // Select maps DAG into configured instructions using a near-optimal,
-    // linear-time algorithm.
+    // Select maps DAG into configured instructions using dynamic
+    // programming. Nodes in DAG will be assign the correspoding tiles in
+    // their TileList.
     // Returns the static execution time of mapped DAG.
     size_t Select(NodeArray *DAG);
 };
