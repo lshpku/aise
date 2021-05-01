@@ -59,8 +59,24 @@ class MISOSelector
     {
       public:
         Node *NodeImpl;
-        IntriNode *BestInst;
+        IntriNode *BestTile; // should be one in NodeImpl->TileList
+        size_t MinCost;
+
+        selectNode() : BestTile(NULL), MinCost(-1) {}
     };
+
+    class context
+    {
+      public:
+        std::vector<selectNode *> DAG;
+    };
+
+    // buttomUp traverses in topological order to decide the locally best
+    // tile for each node.
+    void buttomUp(context &ctx);
+
+    // sumCost returns the cost sum of the tile itself and its operands.
+    size_t sumCost(const IntriNode *tile, context &ctx);
 
   public:
     MISOSelector() : maxInput(0) {}
@@ -68,7 +84,6 @@ class MISOSelector
     // Note: DAG should be legalized.
     void AddInstr(const NodeArray *DAG);
 
-  public:
     // Select maps DAG into configured instructions using a near-optimal,
     // linear-time algorithm.
     // Returns the static execution time of mapped DAG.

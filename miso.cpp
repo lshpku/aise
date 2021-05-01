@@ -88,7 +88,7 @@ void MISOEnumerator::getUpperCone(Node *root, NodeArray &buffer)
 
 void MISOEnumerator::yield(Context &context)
 {
-    node_node_map nodeMap;  // old -> new
+    node_node_map nodeMap;             // old -> new
     std::map<Node *, Node *> inputMap; // new -> old
     std::list<Node *> newNodes;
     std::vector<Node *> inputs; // for permutation
@@ -193,7 +193,7 @@ void MISOEnumerator::yield(Context &context)
         }
         instr->Pred.insert(instr->Pred.end(),
                            orderedInputs.begin(), orderedInputs.end());
-        context.UpperCone[0]->TileList.push_back(instr);
+        context.UpperCone[0]->AddTile(instr);
     }
 
     // delete new nodes

@@ -173,10 +173,18 @@ Node *Node::FromValue(const Value *val)
 
 Node *Node::FromTypeOfNode(const Node *target)
 {
-    if (target->TypeOf(ConstTy)) {
+    switch (target->Type) {
+    case ConstTy:
         return new ConstNode(ConstNode::ValueOf(target));
+    case IntriTy: {
+        IntriNode *node = new IntriNode();
+        node->RefRPN = ((const IntriNode *)target)->RefRPN;
+        node->Cost = ((const IntriNode *)target)->Cost;
+        return node;
     }
-    return new Node(target->Type);
+    default:
+        return new Node(target->Type);
+    }
 }
 
 #define CASE_TOKEN_TYPE(c, t) \
@@ -333,7 +341,7 @@ size_t Node::TypeCost(NodeType type)
     }
 }
 
-size_t Node::AccCost() const
+size_t Node::CriticalPathCost() const
 {
     size_t maxCost = 0;
     const_node_iterator i = PredBegin(), e = PredEnd();
@@ -528,6 +536,20 @@ size_t Node::writeRefRPNImpl(std::string &buffer, size_t index)
 
     Index = index;
     return index + 1;
+}
+
+IntriNode *IntriNode::TileOfNode(const Node *node)
+{
+    IntriNode *tile = new IntriNode();
+    tile->Pred = node->Pred;
+
+    if (node->TypeOf(IntriTy)) {
+        tile->Cost = ((const IntriNode *)node)->Cost;
+    } else {
+        tile->Cost = RoundUpUnitCost(TypeCost(node->Type));
+    }
+
+    return tile;
 }
 
 raw_ostream &operator<<(raw_ostream &out, Node::NodeType type)

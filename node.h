@@ -103,11 +103,11 @@ class Node
 
     // TypeCost returns the base cost of this type.
     static size_t TypeCost(NodeType type);
-    // AccCost returns the accumulated cost of this node. It considers
-    // multiple operands in association.
+    // CriticalPathCost returns the cost sum of this node and the operand
+    // in the critical path. It considers impact of association.
     // This method requires that the costs of its operands are already
     // computed and saved in Index.
-    size_t AccCost() const;
+    size_t CriticalPathCost() const;
 
     // Delete deletes the node.
     // This method will call the right deconstructor. Always use this one
@@ -162,7 +162,8 @@ class Node
   public:
     std::list<IntriNode *> TileList;
 
-    void AddTile(IntriNode *tile);
+    // AddTile adds the tile into the matched tile list.
+    void AddTile(IntriNode *tile) { TileList.push_back(tile); }
 };
 
 llvm::raw_ostream &operator<<(llvm::raw_ostream &out, Node::NodeType type);
@@ -189,10 +190,14 @@ class ConstNode : public Node
 class IntriNode : public Node
 {
   public:
-    std::string RefRPN;
+    std::string RefRPN; // empty for default tile
     size_t Cost;
 
     IntriNode() : Node(IntriTy), Cost(0) {}
+
+    // TileForNode creates the default tile of node. The operands are
+    // directly copied and cost is properly set.
+    static IntriNode *TileOfNode(const Node *node);
 };
 
 } // namespace aise
