@@ -55,20 +55,19 @@ class MISOSelector
     std::vector<IntriNode *> instrList;
     size_t maxInput;
 
-    class selectNode
-    {
-      public:
-        Node *NodeImpl;
-        IntriNode *BestTile; // should be one in NodeImpl->TileList
-        size_t MinCost;
-
-        selectNode() : BestTile(NULL), MinCost(-1) {}
-    };
-
     class context
     {
       public:
-        std::vector<selectNode *> DAG;
+        typedef std::set<size_t> IndexSet;
+
+        NodeArray DAG;
+
+        // in the same order of nodes in DAG
+        std::vector<IntriNode *> BestTile;
+        std::vector<size_t> MinCost;
+        std::vector<bool> Fixed;
+        std::vector<bool> Matched;
+        std::vector<IndexSet> CoveredBy;
     };
 
     // buttomUp traverses in topological order to decide the locally best
@@ -77,6 +76,10 @@ class MISOSelector
 
     // sumCost returns the cost sum of the tile itself and its operands.
     size_t sumCost(const IntriNode *tile, context &ctx);
+
+    // topDown traverses in reversed topological order to get a tiling of
+    // the DAG.
+    void topDown(context &ctx);
 
   public:
     MISOSelector() : maxInput(0) {}

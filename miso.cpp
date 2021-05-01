@@ -185,15 +185,18 @@ void MISOEnumerator::yield(Context &context)
         }
 
         // add instruction to node as a tile
-        IntriNode *instr = new IntriNode();
-        instr->RefRPN = minRPN;
+        IntriNode *tile = new IntriNode();
+        tile->RefRPN = minRPN;
         std::vector<Node *> orderedInputs(inputs.size());
         for (int i = minIndexes.size() - 1; i >= 0; i--) {
             orderedInputs[minIndexes[i]] = inputMap[inputs[i]];
         }
-        instr->Pred.insert(instr->Pred.end(),
-                           orderedInputs.begin(), orderedInputs.end());
-        context.UpperCone[0]->AddTile(instr);
+        tile->Pred.insert(tile->Pred.end(),
+                          orderedInputs.begin(), orderedInputs.end());
+        tile->Covering.insert(tile->Covering.end(),
+                              context.Selected.begin(),
+                              context.Selected.end());
+        context.UpperCone[0]->AddTile(tile);
     }
 
     // delete new nodes

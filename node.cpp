@@ -538,13 +538,14 @@ size_t Node::writeRefRPNImpl(std::string &buffer, size_t index)
     return index + 1;
 }
 
-IntriNode *IntriNode::TileOfNode(const Node *node)
+IntriNode *IntriNode::TileOfNode(Node *node)
 {
     IntriNode *tile = new IntriNode();
     tile->Pred = node->Pred;
+    tile->Covering.push_back(node);
 
     if (node->TypeOf(IntriTy)) {
-        tile->Cost = ((const IntriNode *)node)->Cost;
+        tile->Cost = ((IntriNode *)node)->Cost;
     } else {
         tile->Cost = RoundUpUnitCost(TypeCost(node->Type));
     }

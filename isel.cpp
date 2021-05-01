@@ -1,4 +1,5 @@
 #include "miso.h"
+#include <queue>
 
 using namespace aise;
 using namespace llvm;
@@ -63,18 +64,11 @@ void MISOSelector::AddInstr(const NodeArray *DAG)
 
 size_t MISOSelector::Select(NodeArray *DAG)
 {
-    context ctx;
-
     // find all possible tiles for each node in the DAG
     MISOEnumerator misoEnum(maxInput);
     misoEnum.Enumerate(DAG);
 
     for (size_t i = 0, e = DAG->size(); i != e; ++i) {
-        // wrap nodes in selectNode
-        selectNode *snode = new selectNode();
-        snode->NodeImpl = DAG->at(i);
-        ctx.DAG.push_back(snode);
-
         // assign index
         Node *node = DAG->at(i);
         node->Index = i;
@@ -97,21 +91,25 @@ size_t MISOSelector::Select(NodeArray *DAG)
         node->AddTile(IntriNode::TileOfNode(node));
     }
 
+    context ctx;
+    ctx.DAG.swap(*DAG);
+    ctx.Fixed.resize(ctx.DAG.size(), false);
+
     buttomUp(ctx);
+    topDown(ctx);
 
     {
-        std::vector<selectNode *>::iterator i = ctx.DAG.begin(),
-                                            e = ctx.DAG.end();
+        NodeArray::iterator i = ctx.DAG.begin(), e = ctx.DAG.end();
         for (; i != e; ++i) {
-            Node *node = (*i)->NodeImpl;
-            outs() << *node << '\n';
-            for (std::list<IntriNode *>::iterator k = node->TileList.begin(),
-                                                  q = node->TileList.end();
+            outs() << *(*i) << '\n';
+            for (std::list<IntriNode *>::iterator k = (*i)->TileList.begin(),
+                                                  q = (*i)->TileList.end();
                  k != q; ++k) {
                 outs() << "    " << *(*k) << '\n';
             }
-            outs() << "    Best: " << *(*i)->BestTile
-                   << ", Cost: " << (*i)->MinCost << '\n';
+            size_t index = (*i)->Index;
+            outs() << "    Best: " << *ctx.BestTile[index]
+                   << ", Cost: " << ctx.MinCost[index] << '\n';
         }
     }
 
@@ -120,19 +118,21 @@ size_t MISOSelector::Select(NodeArray *DAG)
 
 void MISOSelector::buttomUp(context &ctx)
 {
-    typedef std::vector<selectNode *>::iterator sn_iter;
-    typedef std::list<IntriNode *>::iterator in_iter;
+    size_t size = ctx.DAG.size();
+    ctx.MinCost.clear();
+    ctx.MinCost.resize(size, -1);
+    ctx.BestTile.clear();
+    ctx.BestTile.resize(size, NULL);
 
-    sn_iter i = ctx.DAG.begin(), e = ctx.DAG.end();
-    for (; i != e; ++i) {
-        // Node: each node must have a default tile
-        in_iter tileIter = (*i)->NodeImpl->TileList.begin(),
-                tileEnd = (*i)->NodeImpl->TileList.end();
-        for (; tileIter != tileEnd; ++tileIter) {
-            size_t cost = sumCost(*tileIter, ctx);
-            if (cost < (*i)->MinCost) {
-                (*i)->MinCost = cost;
-                (*i)->BestTile = *tileIter;
+    for (size_t i = 0; i < size; i++) {
+        Node *node = ctx.DAG[i];
+        std::list<IntriNode *>::iterator ti = node->TileList.begin(),
+                                         te = node->TileList.end();
+        for (; ti != te; ++ti) {
+            size_t cost = sumCost(*ti, ctx);
+            if (cost < ctx.MinCost[i]) {
+                ctx.MinCost[i] = cost;
+                ctx.BestTile[i] = *ti;
             }
         }
     }
@@ -143,9 +143,52 @@ size_t MISOSelector::sumCost(const IntriNode *tile, context &ctx)
     size_t cost = tile->Cost;
     Node::const_node_iterator i = tile->PredBegin(), e = tile->PredEnd();
     for (; i != e; ++i) {
-        cost += ctx.DAG[(*i)->Index]->MinCost;
+        cost += ctx.MinCost[(*i)->Index];
     }
     return cost;
+}
+
+void MISOSelector::topDown(context &ctx)
+{
+    size_t size = ctx.DAG.size();
+    ctx.Matched.clear();
+    ctx.Matched.resize(size, false);
+    ctx.CoveredBy.clear();
+    ctx.CoveredBy.resize(size);
+
+    std::queue<size_t> queue;
+    for (size_t i = 0; i < size; i++) {
+        if (ctx.DAG[i]->Succ.empty()) {
+            queue.push(i);
+        }
+    }
+
+    while (!queue.empty()) {
+        size_t index = queue.front();
+        queue.pop();
+        if (ctx.Matched[index]) {
+            continue;
+        }
+        ctx.Matched[index] = true;
+
+        IntriNode *tile = ctx.BestTile[index];
+        // build the covered-by relationship
+        {
+            std::list<Node *>::iterator i = tile->Covering.begin(),
+                                        e = tile->Covering.end();
+            for (; i != e; ++i) {
+                ctx.CoveredBy[(*i)->Index].insert(index);
+            }
+        }
+        // search ahead
+        {
+            Node::const_node_iterator i = tile->PredBegin(),
+                                      e = tile->PredEnd();
+            for (; i != e; ++i) {
+                queue.push((*i)->Index);
+            }
+        }
+    }
 }
 
 } // namespace aise

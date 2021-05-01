@@ -192,12 +192,13 @@ class IntriNode : public Node
   public:
     std::string RefRPN; // empty for default tile
     size_t Cost;
+    std::list<Node *> Covering; // not include inputs
 
     IntriNode() : Node(IntriTy), Cost(0) {}
 
     // TileForNode creates the default tile of node. The operands are
     // directly copied and cost is properly set.
-    static IntriNode *TileOfNode(const Node *node);
+    static IntriNode *TileOfNode(Node *node);
 };
 
 } // namespace aise
