@@ -57,6 +57,7 @@ int doEnum()
         }
         misoEnum.Save(out.OS());
     }
+    return 0;
 }
 
 int doIsel()
@@ -88,7 +89,24 @@ int doIsel()
                    << bcBuffer.size() << " and " << confBuffer.size() << '\n';
             return -1;
         }
+    } else {
+        confBuffer.resize(bcBuffer.size(), 1);
     }
+
+    MISOSelector misoSel;
+    std::list<NodeArray *>::iterator i, e;
+    for (i = misoBuffer.begin(), e = misoBuffer.end(); i != e; ++i) {
+        misoSel.AddInstr(*i);
+    }
+
+    size_t totalSTA = 0;
+    std::list<size_t>::iterator c = confBuffer.begin();
+    for (i = bcBuffer.begin(), e = bcBuffer.end(); i != e; ++i, ++c) {
+        size_t STA = misoSel.Select(*i);
+        totalSTA += STA * (*c);
+    }
+
+    outs() << "STA: " << totalSTA << '\n';
 
     return 0;
 }

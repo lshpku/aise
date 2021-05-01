@@ -151,7 +151,7 @@ int ParseMISO(llvm::Twine path, std::list<NodeArray *> &buffer)
             lineRef = fileRef.substr(EOL, nextEOL - EOL);
             EOL = nextEOL + 1;
         }
-        
+
         lineRef = lineRef.trim();
         if (lineRef.empty()) {
             continue;
@@ -299,7 +299,7 @@ int ParseInt(const std::string &str, int &buffer)
 
 std::string ToString(int a)
 {
-    static std::stringstream buf;
+    std::stringstream buf;
     buf.clear();
     buf << a;
     return buf.str();

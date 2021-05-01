@@ -51,6 +51,7 @@ class Permutation
     Permutation(size_t n);
 
     bool HasNext() const { return !status.empty(); }
+    // Next returns a permutation of indexes {0, 1, ..., n - 1}.
     const std::vector<size_t> &Next();
 };
 

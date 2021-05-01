@@ -13,9 +13,7 @@ class MISOEnumerator
 {
     int maxInput;
     // inst in minimal PRN
-    std::vector<std::string> uniqueInsts;
-    // inst in each permutation of inputs
-    llvm::StringMap<size_t> permutedInsts;
+    llvm::StringMap<size_t> instrMap;
 
     // Get upper cone of root into buffer.
     // Nodes are added in reversed topological order.
@@ -50,17 +48,31 @@ class MISOEnumerator
 // Nodes in DAG keep topological order after processing.
 void LegalizeDAG(NodeArray *DAG);
 
-class MISOInstr
+class MISOSelector
 {
-    // nodes are in topological order, i.e., root at the back
-    NodeArray nodes;
-    // inputs are in the order that when assigned from 1 to N, the RPN
-    // is exactly minimal
-    NodeArray inputs;
-    std::string rpn;
+    // each instruction is represented by an IntriNode
+    llvm::StringMap<IntriNode *> instrMap;
+    std::vector<IntriNode *> instrList;
+    size_t maxInput;
+
+    class selectNode
+    {
+      public:
+        Node *NodeImpl;
+        IntriNode *BestInst;
+    };
 
   public:
-    const std::string &GetRPN() const { return rpn; }
+    MISOSelector() : maxInput(0) {}
+
+    // Note: DAG should be legalized.
+    void AddInstr(const NodeArray *DAG);
+
+  public:
+    // Select maps DAG into configured instructions using a near-optimal,
+    // linear-time algorithm.
+    // Returns the static execution time of mapped DAG.
+    size_t Select(NodeArray *DAG);
 };
 
 } // namespace aise

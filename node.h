@@ -12,6 +12,7 @@ namespace aise
 
 class Node;
 class ConstNode;
+class IntriNode;
 typedef std::vector<Node *> NodeArray;
 
 class Node
@@ -20,6 +21,7 @@ class Node
     enum NodeType {
         UnkTy,
         ConstTy,
+        IntriTy,
 
         // Unary ops
         AddInvTy,
@@ -76,7 +78,9 @@ class Node
 
     bool IsLabel() const { return TypeOf(Order1Ty) || TypeOf(Order2Ty); }
     bool IsConstant() const { return TypeOf(ConstTy); }
+    bool IsIntrinsic() const { return TypeOf(IntriTy); }
     bool IsAssociative() const;
+    bool IsInput() const { return Type >= FirstInputTy; }
 
     static Node *FromInstruction(const llvm::Instruction *inst);
     static Node *FromValue(const llvm::Value *val);
@@ -88,6 +92,22 @@ class Node
     static Node *FromToken(const std::string &token, std::string &error);
     template <typename T>
     static Node *FromType(T type) { return new Node((NodeType)type); }
+
+    // UnitCost is the cost of one adder.
+    // Cost of an instruction should be round up to multiple of UnitCost.
+    static const size_t UnitCost = 100;
+    static size_t RoundUpUnitCost(size_t cost)
+    {
+        return (cost + UnitCost - 1) / UnitCost * UnitCost;
+    }
+
+    // TypeCost returns the base cost of this type.
+    static size_t TypeCost(NodeType type);
+    // AccCost returns the accumulated cost of this node. It considers
+    // multiple operands in association.
+    // This method requires that the costs of its operands are already
+    // computed and saved in Index.
+    size_t AccCost() const;
 
     // Delete deletes the node.
     // This method will call the right deconstructor. Always use this one
@@ -130,15 +150,19 @@ class Node
     // It's required that the predecessors are all sorted.
     void Sort();
 
-    // WriteRPN writes the Reversed Polish notation of the expanding tree
-    // of this node.
-    void WriteRPN(std::string &buffer) const;
+    // WriteRefRPN writes the referenced Reversed Polish notation of the
+    // upper cone of this node.
+    // This method requires that indexes of all the nodes in the upper cone
+    // be set to 0, and will change these indexes during processing.
+    void WriteRefRPN(std::string &buffer) { writeRefRPNImpl(buffer, 1); }
 
-    // WriteRefRPN is like WriteRPN but uses reference when an operand has
-    // been represented before.
-    // index is the current index in RPN (starts from 1).
-    // Returns the new index.
-    size_t WriteRefRPN(std::string &buffer, size_t index = 1);
+  private:
+    size_t writeRefRPNImpl(std::string &buffer, size_t index);
+
+  public:
+    std::list<IntriNode *> TileList;
+
+    void AddTile(IntriNode *tile);
 };
 
 llvm::raw_ostream &operator<<(llvm::raw_ostream &out, Node::NodeType type);
@@ -160,6 +184,15 @@ class ConstNode : public Node
 
     ConstNode() : Node(ConstTy) {}
     ConstNode(const std::string &value) : Node(ConstTy), Value(value) {}
+};
+
+class IntriNode : public Node
+{
+  public:
+    std::string RefRPN;
+    size_t Cost;
+
+    IntriNode() : Node(IntriTy), Cost(0) {}
 };
 
 } // namespace aise

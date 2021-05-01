@@ -61,13 +61,22 @@ const char *Node::TypeName(NodeType type)
 
 void Node::WriteTypeName(std::string &buffer) const
 {
-    if (Type >= FirstInputTy) {
-        buffer.push_back('$');
-        std::stringstream buf;
-        buf << Type - FirstInputTy + 1;
-        buffer.append(buf.str());
-    } else {
-        buffer.append(TypeName());
+    switch (Type) {
+    case ConstTy:
+        buffer.append(((const ConstNode *)this)->Value);
+        break;
+    case IntriTy:
+        buffer.append("\"");
+        buffer.append(((const IntriNode *)this)->RefRPN);
+        buffer.append("\"");
+        break;
+    default:
+        if (Type >= FirstInputTy) {
+            buffer.push_back('$');
+            buffer.append(ToString(Type - FirstInputTy + 1));
+        } else {
+            buffer.append(TypeName());
+        }
     }
 }
 
@@ -284,11 +293,70 @@ Node *Node::FromToken(const std::string &token, std::string &error)
     return node;
 }
 
+#define CASE_TYPE_COST(t, c) \
+    case t:                  \
+        return c
+
+size_t Node::TypeCost(NodeType type)
+{
+    switch (type) {
+        // Cost of inv types is set as that the total cost is the sum of
+        // this and cost of the base type.
+        CASE_TYPE_COST(AddInvTy, 0);
+        CASE_TYPE_COST(MulInvTy, 200);
+
+        CASE_TYPE_COST(AddTy, 100);
+        CASE_TYPE_COST(SubTy, 100);
+        CASE_TYPE_COST(MulTy, 300);
+        CASE_TYPE_COST(DivTy, 500);
+        CASE_TYPE_COST(RemTy, 500);
+
+        CASE_TYPE_COST(ShlTy, 20);
+        CASE_TYPE_COST(LshrTy, 20);
+        CASE_TYPE_COST(AshrTy, 20);
+        CASE_TYPE_COST(AndTy, 10);
+        CASE_TYPE_COST(OrTy, 10);
+        CASE_TYPE_COST(XorTy, 10);
+
+        CASE_TYPE_COST(EqTy, 10);
+        CASE_TYPE_COST(NeTy, 10);
+        CASE_TYPE_COST(GtTy, 100);
+        CASE_TYPE_COST(GeTy, 100);
+        CASE_TYPE_COST(LtTy, 100);
+        CASE_TYPE_COST(LeTy, 100);
+
+        CASE_TYPE_COST(SelectTy, 20);
+
+    // unk, const and input nodes has a cost of 0
+    default:
+        return 0;
+    }
+}
+
+size_t Node::AccCost() const
+{
+    size_t maxCost = 0;
+    const_node_iterator i = PredBegin(), e = PredEnd();
+    for (; i != e; ++i) {
+        maxCost = std::max(maxCost, (*i)->Index);
+    }
+    if (IsAssociative()) {
+        return (Pred.size() - 1) * TypeCost(Type) + maxCost;
+    }
+    return TypeCost(Type) + maxCost;
+}
+
+#define CASE_TYPE_DELETE(t, c) \
+    case t:                    \
+        delete (c *)node;      \
+        break
+
 void Node::Delete(Node *node)
 {
-    if (node->TypeOf(ConstTy)) {
-        delete (ConstNode *)node;
-    } else {
+    switch (node->Type) {
+        CASE_TYPE_DELETE(ConstTy, ConstNode);
+        CASE_TYPE_DELETE(IntriTy, IntriNode);
+    default:
         delete node;
     }
 }
@@ -325,15 +393,11 @@ void Node::RelaxOrder(std::list<Node *> &buffer)
         }
     } break;
 
+    case UnkTy:
+        break;
+
     // non-commutative
-    case SubTy:
-    case DivTy:
-    case RemTy:
-    case ShlTy:
-    case LshrTy:
-    case AshrTy:
-    CASE_CMP:
-    case SelectTy: {
+    default: {
         node_iterator i = Pred.begin(), e = Pred.end();
         for (unsigned cnt = 0; i != e && cnt < 3; ++cnt, ++i) {
             // add ordering labels to operands since the second one
@@ -424,38 +488,7 @@ bool Node::LessTypeCompare::operator()(const Node *a, const Node *b) const
 
 void Node::Sort() { Pred.sort(LessTypeCompare()); }
 
-void Node::WriteRPN(std::string &buffer) const
-{
-    if (TypeOf(ConstTy)) {
-        buffer.append(ConstNode::ValueOf(this));
-        return;
-    }
-    if (TypeOf(Order1Ty) || TypeOf(Order2Ty)) {
-        // label node has exactly one operand
-        (*PredBegin())->WriteRPN(buffer);
-        return;
-    }
-
-    const_node_iterator i = PredBegin(), e = PredEnd();
-    for (; i != e; ++i) {
-        (*i)->WriteRPN(buffer);
-        buffer.push_back(' ');
-    }
-    buffer.append(TypeName());
-
-    switch (Type) {
-    // add a number to associative ops with more than 2 operands
-    CASE_ASSOCIATIVE:
-        if (Pred.size() > 2) {
-            std::stringstream buf;
-            buf << Pred.size();
-            buffer.append(buf.str());
-        }
-        break;
-    }
-}
-
-size_t Node::WriteRefRPN(std::string &buffer, size_t index)
+size_t Node::writeRefRPNImpl(std::string &buffer, size_t index)
 {
     if (Index > 0) {
         buffer.push_back('@');
@@ -472,12 +505,12 @@ size_t Node::WriteRefRPN(std::string &buffer, size_t index)
     }
     if (TypeOf(Order1Ty) || TypeOf(Order2Ty)) {
         // label node doesn't take up space
-        return (*PredBegin())->WriteRefRPN(buffer, index);
+        return (*PredBegin())->writeRefRPNImpl(buffer, index);
     }
 
     node_iterator i = Pred.begin(), e = Pred.end();
     for (; i != e; ++i) {
-        index = (*i)->WriteRefRPN(buffer, index);
+        index = (*i)->writeRefRPNImpl(buffer, index);
         buffer.push_back(' ');
     }
     WriteTypeName(buffer);
@@ -509,7 +542,11 @@ raw_ostream &operator<<(raw_ostream &out, Node::NodeType type)
 
 raw_ostream &operator<<(raw_ostream &out, const Node &node)
 {
-    out << &node << " = " << node.Type;
+    out << &node << " = ";
+    std::string str;
+    node.WriteTypeName(str);
+    out << str;
+
     Node::const_node_iterator i = node.PredBegin(), e = node.PredEnd();
     for (; i != e; ++i) {
         out << ' ' << *i;

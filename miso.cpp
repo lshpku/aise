@@ -88,7 +88,8 @@ void MISOEnumerator::getUpperCone(Node *root, NodeArray &buffer)
 
 void MISOEnumerator::yield(Context &context)
 {
-    node_node_map nodeMap; // old ptr -> new ptr
+    node_node_map nodeMap;  // old -> new
+    std::map<Node *, Node *> inputMap; // new -> old
     std::list<Node *> newNodes;
     std::vector<Node *> inputs; // for permutation
     node_set::iterator i, e;
@@ -99,6 +100,7 @@ void MISOEnumerator::yield(Context &context)
         // input nodes has no type nor predecessor
         Node *node = new Node();
         nodeMap[*i] = node;
+        inputMap[node] = *i;
         inputs.push_back(node);
     }
     for (i = context.Selected.begin(), e = context.Selected.end(); i != e; ++i) {
@@ -149,6 +151,7 @@ void MISOEnumerator::yield(Context &context)
     // there is no permutation, thus no instruction is generated.
     Permutation perm(inputs.size());
     std::string RPN, minRPN;
+    std::vector<size_t> minIndexes;
     while (perm.HasNext()) {
         const std::vector<size_t> &indexes = perm.Next();
         for (int i = indexes.size() - 1; i >= 0; i--) {
@@ -168,17 +171,29 @@ void MISOEnumerator::yield(Context &context)
 
         RPN.clear();
         root->WriteRefRPN(RPN);
-
-        if (permutedInsts.find(RPN) != permutedInsts.end()) {
-            break; // inst exists
-        }
         if (minRPN.empty() || RPN < minRPN) {
             minRPN = RPN;
+            minIndexes = indexes;
         }
-        permutedInsts[RPN] = uniqueInsts.size() - 1;
     }
+
     if (!minRPN.empty()) {
-        uniqueInsts.push_back(minRPN);
+        // save instruction if it's new
+        if (instrMap.find(minRPN) == instrMap.end()) {
+            size_t instrIndex = instrMap.size();
+            instrMap[minRPN] = instrIndex;
+        }
+
+        // add instruction to node as a tile
+        IntriNode *instr = new IntriNode();
+        instr->RefRPN = minRPN;
+        std::vector<Node *> orderedInputs(inputs.size());
+        for (int i = minIndexes.size() - 1; i >= 0; i--) {
+            orderedInputs[minIndexes[i]] = inputMap[inputs[i]];
+        }
+        instr->Pred.insert(instr->Pred.end(),
+                           orderedInputs.begin(), orderedInputs.end());
+        context.UpperCone[0]->TileList.push_back(instr);
     }
 
     // delete new nodes
@@ -279,8 +294,13 @@ void MISOEnumerator::Enumerate(const NodeArray *DAG)
 
 void MISOEnumerator::Save(raw_ostream &out)
 {
-    std::vector<std::string>::iterator i, e;
-    for (i = uniqueInsts.begin(), e = uniqueInsts.end(); i != e; ++i) {
+    typedef llvm::StringMap<size_t>::iterator smi;
+    std::vector<std::string> instrArray(instrMap.size());
+    for (smi i = instrMap.begin(), e = instrMap.end(); i != e; ++i) {
+        instrArray[i->second] = i->first();
+    }
+    typedef std::vector<std::string>::iterator vsi;
+    for (vsi i = instrArray.begin(), e = instrArray.end(); i != e; ++i) {
         out << *i << '\n';
     }
 }
