@@ -301,41 +301,14 @@ Node *Node::FromToken(const std::string &token, std::string &error)
     return node;
 }
 
-#define CASE_TYPE_COST(t, c) \
-    case t:                  \
-        return c
-
 size_t Node::TypeCost(NodeType type)
 {
     switch (type) {
-        // Cost of inv types is set as that the total cost is the sum of
-        // this and cost of the base type.
-        CASE_TYPE_COST(AddInvTy, 0);
-        CASE_TYPE_COST(MulInvTy, 200);
 
-        CASE_TYPE_COST(AddTy, 100);
-        CASE_TYPE_COST(SubTy, 100);
-        CASE_TYPE_COST(MulTy, 300);
-        CASE_TYPE_COST(DivTy, 500);
-        CASE_TYPE_COST(RemTy, 500);
+#define COST_DELAY_BEGIN
+#include "cost.h"
 
-        CASE_TYPE_COST(ShlTy, 20);
-        CASE_TYPE_COST(LshrTy, 20);
-        CASE_TYPE_COST(AshrTy, 20);
-        CASE_TYPE_COST(AndTy, 10);
-        CASE_TYPE_COST(OrTy, 10);
-        CASE_TYPE_COST(XorTy, 10);
-
-        CASE_TYPE_COST(EqTy, 10);
-        CASE_TYPE_COST(NeTy, 10);
-        CASE_TYPE_COST(GtTy, 100);
-        CASE_TYPE_COST(GeTy, 100);
-        CASE_TYPE_COST(LtTy, 100);
-        CASE_TYPE_COST(LeTy, 100);
-
-        CASE_TYPE_COST(SelectTy, 20);
-
-    // unk, const and input nodes has a cost of 0
+    // unk, const and input nodes have a cost of 0
     default:
         return 0;
     }
@@ -352,6 +325,19 @@ size_t Node::CriticalPathCost() const
         return (Pred.size() - 1) * TypeCost(Type) + maxCost;
     }
     return TypeCost(Type) + maxCost;
+}
+
+size_t Node::TypeArea(NodeType type)
+{
+    switch (type) {
+
+#define COST_AREA_BEGIN
+#include "cost.h"
+
+    // unk and input nodes have an area of 0
+    default:
+        return 0;
+    }
 }
 
 #define CASE_TYPE_DELETE(t, c) \

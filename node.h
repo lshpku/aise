@@ -109,6 +109,9 @@ class Node
     // computed and saved in Index.
     size_t CriticalPathCost() const;
 
+    static size_t TypeArea(NodeType type);
+    size_t TypeArea() { return TypeArea(Type); }
+
     // Delete deletes the node.
     // This method will call the right deconstructor. Always use this one
     // instead of calling delete yourself.
