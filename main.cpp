@@ -12,12 +12,32 @@ cl::opt<std::string> command(cl::Positional, cl::desc("<command>"), cl::Required
 cl::list<std::string> inputList(cl::Positional, cl::desc("[<input>...]"));
 cl::opt<std::string> outputPath("o", cl::desc("Specify output file (default stdout)"), cl::value_desc("filename"));
 cl::opt<std::string> maxInput("max-input", cl::desc("Specify max input (default 2)"), cl::value_desc("int"), cl::init("2"));
+cl::opt<std::string> maxDepth("max-depth", cl::desc("Specify max depth (default 10)"), cl::value_desc("int"), cl::init("10"));
+cl::opt<bool> interactive("interactive", cl::desc("Use interactive mode"));
 cl::extrahelp commandHelp(
     "\nCOMMAND:\n"
     "  enum - Enumerate MISO instructions in LLVM assembly\n"
     "         input: <bitcode>\n"
-    "  isel - Map LLVM assembly to MISO instructions\n"
-    "         inputs: <bitcode> <miso> [<bcconf>]\n");
+    "  isel - Apply MISO instructions to LLVM assembly\n"
+    "         inputs (one-off): <bitcode> <miso> [<bcconf>]\n"
+    "         inputs (interactive): <bitcode> [<bcconf>]\n"
+    "  area - Count area of MISO instructions\n"
+    "         input: <miso>\n");
+
+int parseNonNeg(const std::string &str, const char *name)
+{
+    int value;
+    if (ParseInt(str, value) < 0) {
+        errs() << "Not an integer: " << str << '\n';
+        return -1;
+    }
+    if (value < 0) {
+        errs() << "Invalid value '" << value << "' for '" << name
+               << "': Should be non-negative\n";
+        return -1;
+    }
+    return value;
+}
 
 int doEnum()
 {
@@ -31,18 +51,15 @@ int doEnum()
         return -1;
     }
 
-    int maxInputVal;
-    if (ParseInt(maxInput, maxInputVal) < 0) {
-        errs() << "Not an integer: " << maxInput << '\n';
+    int maxInputVal, maxDepthVal;
+    if ((maxInputVal = parseNonNeg(maxInput, "-max-input")) < 0) {
         return -1;
     }
-    if (maxInputVal <= 0) {
-        errs() << "Invalid value for max input '" << maxInputVal
-               << "': Should be positive\n";
+    if ((maxDepthVal = parseNonNeg(maxDepth, "-max-depth")) < 0) {
         return -1;
     }
 
-    MISOEnumerator misoEnum(maxInputVal);
+    MISOEnumerator misoEnum(maxInputVal, maxDepthVal);
     std::list<NodeArray *>::iterator i, e;
     for (i = buffer.begin(), e = buffer.end(); i != e; ++i) {
         misoEnum.Enumerate(*i);
@@ -62,12 +79,8 @@ int doEnum()
 
 int doIsel()
 {
-    if (inputList.size() < 2) {
-        errs() << "isel: Requires 2 or more inputs\n";
-        return -1;
-    }
-    if (inputList.size() > 3) {
-        errs() << "isel: Requires no more than 3 inputs\n";
+    if (inputList.size() < 2 || inputList.size() > 3) {
+        errs() << "isel (one-off): Requires 2 or 3 inputs\n";
         return -1;
     }
 
@@ -111,6 +124,27 @@ int doIsel()
     return 0;
 }
 
+int doArea()
+{
+    if (inputList.size() != 1) {
+        errs() << "area: Requires exactly 1 input\n";
+        return -1;
+    }
+
+    std::list<NodeArray *> buffer;
+    if (ParseMISO(inputList[0], buffer) < 0) {
+        return -1;
+    }
+
+    MISOSynthesizer misoSyn;
+    typedef std::list<NodeArray *>::iterator ln_iter;
+    for (ln_iter i = buffer.begin(), e = buffer.end(); i != e; ++i) {
+        misoSyn.AddInstr(*i);
+    }
+    outs() << "Area: " << misoSyn.GetArea() << '\n';
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char **argv)
@@ -121,6 +155,8 @@ int main(int argc, char **argv)
         return doEnum();
     } else if (command == "isel") {
         return doIsel();
+    } else if (command == "area") {
+        return doArea();
     } else {
         errs() << "main: Unknown command: " << command << '\n';
         return -1;

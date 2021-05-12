@@ -32,14 +32,14 @@ NodeArray *parseBasicBlock(const BasicBlock &bb)
         const Instruction &inst = *instIter;
         Node *node = Node::FromInstruction(&inst);
 
-        // Add operands to node
+        // add operands to node
         User::const_op_iterator opIter = inst.op_begin(), opEnd = inst.op_end();
         for (; opIter != opEnd; ++opIter) {
             value_node_map::iterator opNode = nodeMap.find(*opIter);
 
-            // When the operand is defined in another basic block, or is defined
-            // later in the same block but used by a phi instruction, or is
-            // constant, it would not be found.
+            // When the operand is defined in another basic block, or is
+            // defined later in the same block but used by a phi instruction,
+            // it would not be found.
             if (opNode == nodeMap.end()) {
                 Node *virtIn = Node::FromValue(*opIter);
                 virtIn->Index = DAG.size();
@@ -51,7 +51,7 @@ NodeArray *parseBasicBlock(const BasicBlock &bb)
             }
         }
 
-        // Look for external uses of node
+        // look for external uses of node
         Node *virtSucc = NULL;
         if (inst.isUsedOutsideOfBlock(&bb)) {
             virtSucc = new Node();
@@ -67,7 +67,7 @@ NodeArray *parseBasicBlock(const BasicBlock &bb)
             }
         }
 
-        // Add node to dag
+        // add node to DAG
         node->Index = DAG.size();
         nodeMap[&inst] = node;
         DAG.push_back(node);
@@ -78,7 +78,7 @@ NodeArray *parseBasicBlock(const BasicBlock &bb)
         }
     }
 
-    // Build successor dependency
+    // build successing relationship
     {
         std::vector<Node *>::iterator i = DAG.begin(), e = DAG.end();
         for (; i != e; ++i) {

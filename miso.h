@@ -4,41 +4,64 @@
 #include "node.h"
 #include "llvm/ADT/StringMap.h"
 #include <vector>
+#include <map>
 #include <set>
+#include <queue>
 
 namespace aise
 {
 
 class MISOEnumerator
 {
-    int maxInput;
+    int maxInput, maxDepth;
     // inst in minimal PRN
     llvm::StringMap<size_t> instrMap;
 
-    // Get upper cone of root into buffer.
-    // Nodes are added in reversed topological order.
-    void getUpperCone(Node *root, NodeArray &buffer);
+    typedef std::set<Node *, Node::LessIndexCompare> node_set;
 
     class Context
     {
+        typedef std::priority_queue<Node *, NodeArray, Node::LessIndexCompare> node_heap;
+
+        std::map<Node *, size_t> nodeDepth;
+
+        void pushAllPred(Node *root, node_heap &queue);
+
       public:
-        // in reversed topological order
+        // UpperCone is the MaxMISO rooted at root.
+        // Nodes in UpperCone are in reversed topological order.
         NodeArray UpperCone;
-        std::vector<bool> Choices;
-        // don't overlap
-        std::set<Node *, Node::LessIndexCompare> Selected, Inputs;
+        node_set UpperConeSet;
+
+        // parallel to UpperCone
+        std::vector<bool> Choice;
+
+        node_set Selected;
+        node_set Input;
+        // Number of inputs in Inputs that don't belong to UpperCone.
+        size_t MandatoryInputs;
+
+        Context() : MandatoryInputs(0) {}
+
+        // Init initializes context for root and its upper cone.
+        // Do call this method once for each instance of Context.
+        void Init(Node *root, size_t maxDepth);
+
+        // IsOutput checks if node is used by nodes outside Selected.
+        bool IsOutput(Node *node);
     };
 
     // recurse recurses on the current upper cone.
-    void recurse(Context &context);
+    void recurse(Context &ctx);
 
     // yield yields the currently selected MISO instruction.
-    void yield(Context &context);
+    void yield(Context &ctx);
 
   public:
-    MISOEnumerator(size_t _maxInput) : maxInput(_maxInput) {}
+    MISOEnumerator(size_t _maxInput, size_t _maxDepth);
 
-    void Enumerate(const NodeArray *DAG);
+    // Enumerate enumerates all MISO instructions in DAG.
+    void Enumerate(NodeArray *DAG);
 
     void Save(llvm::raw_ostream &out);
 };
@@ -53,7 +76,7 @@ class MISOSelector
     // each instruction is represented by an IntriNode
     llvm::StringMap<IntriNode *> instrMap;
     std::vector<IntriNode *> instrList;
-    size_t maxInput;
+    size_t maxInput, maxDepth;
 
     class context
     {
@@ -86,10 +109,25 @@ class MISOSelector
     void AddInstr(const NodeArray *DAG);
 
     // Select maps DAG into configured instructions using dynamic
-    // programming. Nodes in DAG will be assign the correspoding tiles in
-    // their TileList.
+    // programming. DAG should have been enumerated.
+    // Nodes in DAG will be assigned the correspoding tiles in their
+    // TileList. Skipped nodes have an empty TileList.
     // Returns the static execution time of mapped DAG.
     size_t Select(NodeArray *DAG);
+
+    size_t GetMaxInput() { return maxInput; }
+};
+
+class MISOSynthesizer
+{
+    size_t area;
+
+  public:
+    MISOSynthesizer() : area(0) {}
+
+    void AddInstr(const NodeArray *DAG);
+
+    size_t GetArea() { return area; }
 };
 
 } // namespace aise

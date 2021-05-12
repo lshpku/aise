@@ -163,7 +163,9 @@ Node *Node::FromValue(const Value *val)
         return new Node(); // unk
     }
     ConstNode *node = new ConstNode();
-    if (val->getType()->isIntegerTy()) {
+    if (val->getValueID() == Value::UndefValueVal) {
+        node->Value = "undef";
+    } else if (val->getType()->isIntegerTy()) {
         node->Value = ((const Constant *)val)->getUniqueInteger().toString(10, true);
     } else {
         node->Value = "inf";

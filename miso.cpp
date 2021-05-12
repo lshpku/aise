@@ -2,92 +2,101 @@
 #include "miso.h"
 #include "utils.h"
 #include "llvm/Support/raw_os_ostream.h"
-#include <vector>
-#include <map>
-#include <queue>
 
 using namespace aise;
 using namespace llvm;
 
-namespace
-{
-
-typedef std::priority_queue<Node *, std::vector<Node *>, Node::LessIndexCompare> node_heap;
-typedef std::set<Node *, Node::LessIndexCompare> node_set;
-typedef std::map<Node *, Node *, Node::LessIndexCompare> node_node_map;
-
-void pushAllPred(Node *node, node_heap &buffer)
-{
-    Node::const_node_iterator i = node->PredBegin(), e = node->PredEnd();
-    for (; i != e; ++i) {
-        if ((*i)->Type != Node::UnkTy) {
-            buffer.push(*i);
-        }
-    }
-}
-
-bool isConvexAndNotOutput(const Node *node, const node_set &selected)
-{
-    Node::const_node_iterator i = node->SuccBegin(), e = node->SuccEnd();
-
-    // A constant is considered convex if one of its successors is
-    // selected. Constants are never considered as output.
-    if (node->TypeOf(Node::ConstTy)) {
-        for (; i != e; ++i) {
-            if (selected.find(*i) != selected.end()) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    for (; i != e; ++i) {
-        if (selected.find(*i) == selected.end()) {
-            return false;
-        }
-    }
-    return true;
-}
-
-} // namespace
-
 namespace aise
 {
 
-void MISOEnumerator::getUpperCone(Node *root, NodeArray &buffer)
+bool MISOEnumerator::Context::IsOutput(Node *node)
+{
+    Node::const_node_iterator i = node->SuccBegin(), e = node->SuccEnd();
+
+    // Constant is not output if one of its successors is selected.
+    if (node->TypeOf(Node::ConstTy)) {
+        for (; i != e; ++i) {
+            if (Selected.find(*i) != Selected.end()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // Arithmetic node is output if it's used by nodes outside UpperCone.
+    for (; i != e; ++i) {
+        if (Selected.find(*i) == Selected.end()) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void MISOEnumerator::Context::Init(Node *root, size_t maxDepth)
 {
     if (root->Type == Node::UnkTy) {
         return;
     }
 
-    node_heap candidates;
-    node_set selected;
-    pushAllPred(root, candidates);
-    buffer.push_back(root);
-    selected.insert(root);
+    node_heap queue;
+    pushAllPred(root, queue);
+    UpperCone.push_back(root);
+    Selected.insert(root);
 
-    while (!candidates.empty()) {
-        Node *node = candidates.top();
-        candidates.pop();
+    while (!queue.empty()) {
+        Node *node = queue.top();
+        queue.pop();
 
         // skip nodes that are selected
-        if (selected.find(node) != selected.end()) {
+        if (Selected.find(node) != Selected.end()) {
             continue;
         }
-        // node should be convex and has no outer successor
-        if (!isConvexAndNotOutput(node, selected)) {
+        // node should not be output (thus convex)
+        if (IsOutput(node)) {
+            continue;
+        }
+        if (nodeDepth[node] > maxDepth) {
             continue;
         }
 
         // select the node
-        pushAllPred(node, candidates);
-        buffer.push_back(node);
-        selected.insert(node);
+        pushAllPred(node, queue);
+        UpperCone.push_back(node);
+        Selected.insert(node);
+    }
+
+    UpperConeSet.swap(Selected);
+
+    if (0) {
+        outs() << "  " << UpperConeSet.size() << ':';
+        node_set::iterator i = UpperConeSet.begin(), e = UpperConeSet.end();
+        for (; i != e; ++i) {
+            outs() << ' ' << nodeDepth[*i];
+        }
+        outs() << '\n';
     }
 }
 
-void MISOEnumerator::yield(Context &context)
+void MISOEnumerator::Context::pushAllPred(Node *node, node_heap &queue)
 {
+    size_t predDepth = nodeDepth[node] + 1;
+    Node::node_iterator i = node->Pred.begin(), e = node->Pred.end();
+    for (; i != e; ++i) {
+        if (!(*i)->TypeOf(Node::UnkTy)) {
+            queue.push(*i);
+            size_t &depth = nodeDepth[*i];
+            depth = std::max(depth, predDepth);
+        }
+    }
+}
+
+MISOEnumerator::MISOEnumerator(size_t _maxInput, size_t _maxDepth)
+    : maxInput(_maxInput), maxDepth(_maxDepth) {}
+
+void MISOEnumerator::yield(Context &ctx)
+{
+    typedef std::map<Node *, Node *, Node::LessIndexCompare> node_node_map;
+
     node_node_map nodeMap;             // old -> new
     std::map<Node *, Node *> inputMap; // new -> old
     std::list<Node *> newNodes;
@@ -96,14 +105,14 @@ void MISOEnumerator::yield(Context &context)
 
     // make a copy of selected and input nodes
     // Only copy Pred, leave Succ and Index empty.
-    for (i = context.Inputs.begin(), e = context.Inputs.end(); i != e; ++i) {
+    for (i = ctx.Input.begin(), e = ctx.Input.end(); i != e; ++i) {
         // input nodes has no type nor predecessor
         Node *node = new Node();
         nodeMap[*i] = node;
         inputMap[node] = *i;
         inputs.push_back(node);
     }
-    for (i = context.Selected.begin(), e = context.Selected.end(); i != e; ++i) {
+    for (i = ctx.Selected.begin(), e = ctx.Selected.end(); i != e; ++i) {
         Node *node = Node::FromTypeOfNode(*i);
         // the mapping should work since selected is in topological order
         Node::const_node_iterator predIter = (*i)->PredBegin(),
@@ -133,7 +142,7 @@ void MISOEnumerator::yield(Context &context)
 
     // Copy available nodes in nodeMap into newNodes to avoid redundant
     // sorting, and delete those that are unavailable.
-    Node *root = nodeMap[context.UpperCone[0]];
+    Node *root = nodeMap[ctx.UpperCone[0]];
     {
         // add nodes in topological order
         node_node_map::iterator i = nodeMap.begin(), e = nodeMap.end();
@@ -193,7 +202,7 @@ void MISOEnumerator::yield(Context &context)
         }
         tile->Pred.insert(tile->Pred.end(),
                           orderedInputs.begin(), orderedInputs.end());
-        context.UpperCone[0]->AddTile(tile);
+        ctx.UpperCone[0]->AddTile(tile);
     }
 
     // delete new nodes
@@ -205,89 +214,101 @@ void MISOEnumerator::yield(Context &context)
     }
 }
 
-void MISOEnumerator::recurse(Context &context)
+void MISOEnumerator::recurse(Context &ctx)
 {
-    std::vector<Node *> newInputs;
-    bool isInput = false;
     // there must be at least one choice
-    bool choice = context.Choices.back();
-    Node *node = context.UpperCone[context.Choices.size() - 1];
+    bool choice = ctx.Choice.back();
+    Node *node = ctx.UpperCone[ctx.Choice.size() - 1];
+
+    std::list<Node *> newInput;
+    typedef std::list<Node *>::iterator list_node_iter;
+    bool isInput = false;
+    size_t newMandarotyInputs = 0;
 
     if (choice) {
-        // check outputs
-        // all nodes except root should have their outputs selected
-        if (context.Choices.size() > 1) {
-            if (!isConvexAndNotOutput(node, context.Selected)) {
+        // node should not be output (thus convex)
+        if (ctx.Choice.size() > 1) { // except root
+            if (ctx.IsOutput(node)) {
                 return;
             }
         }
 
         // update inputs
-        {
-            Node::const_node_iterator i = node->PredBegin(),
-                                      e = node->PredEnd();
-            for (; i != e; ++i) {
-                if (context.Inputs.find(*i) == context.Inputs.end()) {
-                    newInputs.push_back(*i);
-                    context.Inputs.insert(*i);
+        Node::node_iterator i = node->Pred.begin(), e = node->Pred.end();
+        for (; i != e; ++i) {
+            if (ctx.Input.find(*i) == ctx.Input.end()) {
+                newInput.push_back(*i);
+                ctx.Input.insert(*i);
+                if (ctx.UpperConeSet.find(*i) == ctx.UpperConeSet.end()) {
+                    newMandarotyInputs++;
                 }
             }
         }
-        if (context.Inputs.find(node) != context.Inputs.end()) {
+        // number of mandatory inputs should be within max input
+        if (ctx.MandatoryInputs + newMandarotyInputs > maxInput) {
+            list_node_iter i = newInput.begin(), e = newInput.end();
+            for (; i != e; ++i) {
+                ctx.Input.erase(*i);
+            }
+            return;
+        }
+        ctx.MandatoryInputs += newMandarotyInputs;
+
+        // select node
+        ctx.Selected.insert(node);
+        if (ctx.Input.find(node) != ctx.Input.end()) {
             isInput = true;
-            context.Inputs.erase(node);
+            ctx.Input.erase(node);
         }
 
-        context.Selected.insert(node);
-
-        // check inputs before yielding a result
-        // Note: omit primary op.
-        if (context.Inputs.size() <= maxInput &&
-            context.Selected.size() > 1) {
-            yield(context);
+        // Yield an instruction that
+        // 1. has no more that maxInput inputs, and
+        // 2. has more than one operation.
+        if (ctx.Input.size() <= maxInput && ctx.Selected.size() > 1) {
+            yield(ctx);
         }
     }
 
     // recurse
-    if (context.Choices.size() < context.UpperCone.size()) {
-        context.Choices.push_back(true);
-        recurse(context);
-        context.Choices.pop_back();
-        context.Choices.push_back(false);
-        recurse(context);
-        context.Choices.pop_back();
+    if (ctx.Choice.size() < ctx.UpperCone.size()) {
+        ctx.Choice.push_back(true);
+        recurse(ctx);
+        ctx.Choice.pop_back();
+        ctx.Choice.push_back(false);
+        recurse(ctx);
+        ctx.Choice.pop_back();
     }
 
     // restore selected and inputs
     if (choice) {
-        context.Selected.erase(node);
-        std::vector<Node *>::iterator i = newInputs.begin(),
-                                      e = newInputs.end();
+        ctx.Selected.erase(node);
+        list_node_iter i = newInput.begin(), e = newInput.end();
         for (; i != e; ++i) {
-            context.Inputs.erase(*i);
+            ctx.Input.erase(*i);
         }
+        ctx.MandatoryInputs -= newMandarotyInputs;
         if (isInput) {
-            context.Inputs.insert(node);
+            ctx.Input.insert(node);
         }
     }
 }
 
-void MISOEnumerator::Enumerate(const NodeArray *DAG)
+void MISOEnumerator::Enumerate(NodeArray *DAG)
 {
     if (DAG->empty()) {
         return;
     }
 
     // try each node in DAG as root of the MISO instruction
-    NodeArray::const_iterator i = DAG->begin(), e = DAG->end();
+    NodeArray::iterator i = DAG->begin(), e = DAG->end();
     for (; i != e; ++i) {
-        Context context;
-        getUpperCone(*i, context.UpperCone);
+        Context ctx;
+        ctx.Init(*i, maxDepth);
 
-        if (!context.UpperCone.empty()) {
+        if (!ctx.UpperCone.empty()) {
             // always select root
-            context.Choices.push_back(true);
-            recurse(context);
+            ctx.Choice.push_back(true);
+            recurse(ctx);
         }
     }
 }
@@ -391,7 +412,7 @@ void MISOSelector::AddInstr(const NodeArray *DAG)
 size_t MISOSelector::Select(NodeArray *DAG)
 {
     // find all possible tiles for each node in the DAG
-    MISOEnumerator misoEnum(maxInput);
+    MISOEnumerator misoEnum(maxInput, maxDepth);
     misoEnum.Enumerate(DAG);
 
     for (size_t i = 0, e = DAG->size(); i != e; ++i) {
@@ -400,19 +421,18 @@ size_t MISOSelector::Select(NodeArray *DAG)
         node->Index = i;
 
         // filter tiles found in enum stage and assigned costs to them
-        {
-            std::list<IntriNode *>::iterator i = node->TileList.begin();
-            typedef StringMap<IntriNode *>::iterator in_iter;
-            while (i != node->TileList.end()) {
-                in_iter inIter = instrMap.find((*i)->RefRPN);
-                if (inIter == instrMap.end()) {
-                    i = node->TileList.erase(i);
-                } else {
-                    (*i)->Cost = inIter->second->Cost;
-                    ++i;
-                }
+        std::list<IntriNode *>::iterator t = node->TileList.begin();
+        typedef StringMap<IntriNode *>::iterator in_iter;
+        while (t != node->TileList.end()) {
+            in_iter inIter = instrMap.find((*t)->RefRPN);
+            if (inIter == instrMap.end()) {
+                t = node->TileList.erase(t);
+            } else {
+                (*t)->Cost = inIter->second->Cost;
+                ++t;
             }
         }
+
         // add default tile
         node->AddTile(IntriNode::TileOfNode(node));
     }
@@ -511,6 +531,14 @@ void MISOSelector::topDown(context &ctx)
         for (e = tile->PredEnd(); i != e; ++i) {
             queue.push((*i)->Index);
         }
+    }
+}
+
+void MISOSynthesizer::AddInstr(const NodeArray *DAG)
+{
+    NodeArray::const_iterator i = DAG->begin(), e = DAG->end();
+    for (; i != e; ++i) {
+        area += (*i)->TypeArea();
     }
 }
 

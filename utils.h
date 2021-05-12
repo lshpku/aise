@@ -17,6 +17,8 @@ int ParseBitcode(llvm::Twine path, std::list<NodeArray *> &buffer);
 // Returns the number of instructions loaded, -1 if there is any error.
 int ParseMISO(llvm::Twine path, std::list<NodeArray *> &buffer);
 
+NodeArray *ParseMISO(const std::string &RefRPN);
+
 // ParseConf parses the conf file for LLVM assembly.
 // Returns the number of configurations loaded, -1 if there is any error.
 int ParseConf(llvm::Twine path, std::list<size_t> &buffer);
