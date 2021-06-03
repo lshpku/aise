@@ -5,7 +5,7 @@ CPPFLAGS+=$(shell llvm-config --cppflags)
 
 LLVMLIBS=$(shell llvm-config --libs bitreader core support)
 
-OBJECTS=main.o node.o ioutils.o miso.o
+OBJECTS=main.o node.o utils.o miso.o
 
 all: main
 
@@ -20,6 +20,9 @@ all: main
 
 main: $(OBJECTS)
 	$(CXX) -o $@ $(CXXFLAGS) $^ $(LLVMLIBS) $(LDFLAGS)
+
+test:
+	./main enum -max-input 2 -o result.miso.txt div_power_2.bc 
 
 count:
 	wc -l *.h *.cpp

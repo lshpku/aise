@@ -162,14 +162,18 @@ Node *Node::FromValue(const Value *val)
     if (!Constant::classof(val)) {
         return new Node(); // unk
     }
-    ConstNode *node = new ConstNode();
+
+    std::string valStr;
     if (val->getValueID() == Value::UndefValueVal) {
-        node->Value = "undef";
+        valStr = "undef";
     } else if (val->getType()->isIntegerTy()) {
-        node->Value = ((const Constant *)val)->getUniqueInteger().toString(10, true);
+        valStr = ((const Constant *)val)->getUniqueInteger().toString(10, true);
     } else {
-        node->Value = "inf";
+        return new Node();
     }
+
+    ConstNode *node = new ConstNode();
+    node->Value.swap(valStr);
     return node;
 }
 
