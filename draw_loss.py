@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 
 LINE_STYLES = ['solid', 'dashed']
+COLORS = ['tab:red', 'tab:blue']
 
 loss_bf = [
     [
@@ -421,10 +422,22 @@ def split_x_y(a):
     return [x for x, _ in a], [y for _, y in a]
 
 
-plt.figure(figsize=(4, 3))
+def draw_and_save_loss(name):
+    plt.figure(figsize=(4, 3))
 
-for i, s in enumerate(loss_mcu):
-    plt.plot(*split_x_y(s), color='black', ls=LINE_STYLES[i])
+    for i, s in enumerate(globals()[name]):
+        if mode == 'l':
+            plt.plot(*split_x_y(s), color='black', ls=LINE_STYLES[i])
+        elif mode == 'c':
+            plt.plot(*split_x_y(s), color=COLORS[i], ls='solid')
 
-plt.grid()
-plt.show()
+    plt.grid()
+    print('%s -> %s.png' % (name, name))
+    plt.savefig(name + '.png', dpi=200)
+
+
+if __name__ == '__main__':
+    mode = input('specify display mode (l: line style, c: color): ').strip()[0]
+    for key in globals().copy().keys():
+        if key.startswith('loss_'):
+            draw_and_save_loss(key)
