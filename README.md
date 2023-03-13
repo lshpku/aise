@@ -15,7 +15,7 @@ Automatic Instruction Set Extension
 
 ## 使用方法
 ### 安装LLVM
-参考 [Getting Started with the LLVM System](https://llvm.org/docs/GettingStarted.html)
+* 参考 [Getting Started with the LLVM System](https://llvm.org/docs/GettingStarted.html)，请将LLVM加入`PATH`中
 
 ### 编译本项目
 * 在本目录运行`make`即可，它会自动和LLVM库链接
@@ -36,20 +36,34 @@ Automatic Instruction Set Extension
   ```
 * 从LLVM IR中提取出热点函数，单独作为一个`.bc`文件存放
   ```bash
-  llvm-extract -func=a -o a.bc hello.bc
+  $ llvm-extract -func=a -o a.bc hello.bc
   ```
 
 ### 遍历MISO指令
 * 假设最大输入为2，使用下面指令遍历MISO
   ```bash
-  ./main enum -max-input 2 -o result.miso.txt .bc 
+  $ ./main enum -max-input 2 -o result.miso.txt a.bc 
   ```
 
 ### 使用遗传算法选择指令
+* 先安装[遗传算法库](https://pypi.org/project/geneticalgorithm/)
+  ```bash
+  $ pip3 install geneticalgorithm
+  ```
+* 直接运行Python脚本
+  ```bash
+  $ python3 genetic.py
+  ```
+* 注：目前脚本没有输入，如果要改输入的path需要直接改脚本
 
 ## 原理
 
 ### 遍历MISO指令
+* 我使用了[Atasu K et al., IJPP 2003](https://infoscience.epfl.ch/record/53109/files/AtasuDec03_AutomaticApplicationSpecificInstructionSetExtensionsUnderMicroarchitecturalConstraints_IJPP.pdf)的算法，该算法可以完整地遍历DAG中所有多输入单输出的指令（可限制输入数），缺点是算法复杂度较高
+* 基本概念
+  * **子图：**图的节点的一个子集和在该子集中的节点之间直接连接的所有边构成的图
+  * **可调度性：**若图中一个节点的输入来自于图外，而且向上追溯又依赖于图中另一个节点的输出，则这样的指令不符合硬件一个周期执行的原则，称为不可调度
+* 核心思想：
 
 ### MISO指令表示
 
