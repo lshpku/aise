@@ -82,7 +82,33 @@ Automatic Instruction Set Extension
 * 对于第1条指令，`AND`是一个聚合指令，有3个操作数，所以写作`AND3`
 * 对于第2条指令，输入`$1`被引用了两次，在第二次出现时写作`@1`
 * 对于第3条指令，`LSHR`（逻辑右移）的两个操作数顺序不可颠倒，故在图中用`#1`、`#2`区分，但表达式中可省略
+
 <p align="center"><img src="https://lshpku.github.io/aise/miso_repr.svg" width="560"></p>
 
 
 ### 指令集合选择
+
+
+## 实验结果
+
+### MISO指令遍历
+* 在6个热点函数上搜索得到的MISO指令条数和所用时间如下表
+* 可以看到，我的工具可以在<1s内搜索到全部MISO指令，证明了它的高效
+* 这些函数都可以找到数十至数百条MISO指令，说明有很大利用空间
+<p align="center"><img src="https://lshpku.github.io/aise/search_time.svg" width="680"></p>
+
+### 指令集合选择
+
+#### 遗传算法收敛速度
+* 我将遗传算法与随机搜索对比，可以看到遗传算法的收敛速度显著高于随机搜索，而且最终的结果也优于随机搜索，证明遗传算法是有效的
+<p align="center"><img src="https://lshpku.github.io/aise/ga_result.svg" width="750"></p>
+
+#### 性能和面积的Pareto曲线
+* 下图是在6个热点函数上设置2入1出的结果
+* 可以看到，`BF_encrypt`在增加面积的情况下有较大的性能提升，说明它适用于用扩展指令的方法提高性能
+* `sha_transform`和`get_block`则无论增加多大的面积，性能提升都在5%以内，说明它们很难从扩展指令中受益
+<p align="center"><img src="https://lshpku.github.io/aise/pareto1.svg" width="700"></p>
+
+* 下图是在6个热点函数上分别设置2入、3入和4入的结果
+* 可以看到，通常增加输入数可以获得更好的性能，但同时也需要更大的面积
+<p align="center"><img src="https://lshpku.github.io/aise/pareto2.svg" width="750"></p>
