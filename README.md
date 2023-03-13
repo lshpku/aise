@@ -85,11 +85,13 @@ Automatic Instruction Set Extension
 
 <p align="center"><img src="https://lshpku.github.io/aise/miso_repr.svg" width="560"></p>
 
-
 ### 指令集合选择
-
+* 我使用遗传算法进行指令集合选择
+* 候选列表中的每条MISO指令都可以选或不选，故若有`N`条候选的MISO指令，我就构造一个长度为`N`的bit向量，让遗传算法框架优化这个向量
+* 我使用性能和面积作为双重标准，故最终得到的不是单一结果，而是一条Pareto曲线
 
 ## 实验结果
+由于实验分为两个步骤，下面我分别展示两个步骤的结果
 
 ### MISO指令遍历
 * 在6个热点函数上搜索得到的MISO指令条数和所用时间如下表
